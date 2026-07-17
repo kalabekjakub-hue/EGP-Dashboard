@@ -29,6 +29,7 @@ type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documen
 
 type PostHogAnalytics = {
   periodDays: number;
+  trackingDays: number;
   generatedAt: string;
   summary: {
     visitors: number;
@@ -37,10 +38,15 @@ type PostHogAnalytics = {
     checkouts: number;
     paymentStarted: number;
     paidOrders: number;
+    funnelPaidOrders: number;
     totalEvents: number;
     conversion: number;
     revenue: number;
     averageOrder: number;
+    productRevenue: number;
+    processingRevenue: number;
+    plusRevenue: number;
+    ownRevenueBeforePaymentFees: number;
     flexOrders: number;
     vignettes: number;
     bridgeTolls: number;
@@ -63,6 +69,7 @@ type PostHogAnalytics = {
   languages: Array<{ name: string; visitors: number }>;
   checkoutSteps: Array<{ name: string; views: number }>;
   validationIssues: Array<{ step: string; reason: string; count: number }>;
+  financeByCurrency: Array<{ currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>;
 };
 
 type AffiliateAnalytics = {
@@ -759,7 +766,7 @@ function analyticsLabel(value: string) {
   return labels[value] ?? value;
 }
 
-type AnalyticsTab = "overview" | "orders" | "affiliate" | "traffic" | "behavior";
+type AnalyticsTab = "overview" | "orders" | "finance" | "affiliate" | "traffic" | "behavior";
 
 function comparisonText(current: number, previous: number) {
   if (!previous) return current ? "Nová data" : "Beze změny";
@@ -795,6 +802,9 @@ function PostHogDetail({ back }: { back: () => void }) {
   }).join(" ");
   const checkoutPath = dailyChartPath(data.daily.map(day => day.checkouts));
   const paidPath = dailyChartPath(data.daily.map(day => day.paidOrders));
+  const comparisonNote = (current: number, previous: number) => data.periodDays >= 30
+    ? `${comparisonText(current, previous)} proti předchozímu období`
+    : "Bez srovnatelného předchozího období";
   const yTicks = Array.from({ length: 5 }, (_, index) => chartScaleMax - index * chartScaleMax / 4);
   const xTickIndexes = Array.from(new Set([0, 1, 2, 3, 4].map(index => Math.round(index * Math.max(data.daily.length - 1, 0) / 4))));
   const firstDate = data.daily[0]?.date;
@@ -802,15 +812,15 @@ function PostHogDetail({ back }: { back: () => void }) {
   const formatShortDate = (value?: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) : "–";
   return <main className="page-shell analytics-page">
     <BackButton onClick={back} />
-    <div className="analytics-heading"><div><span className="eyebrow">Posledních {data.periodDays} dní</span><h1>PostHog</h1><p>Chování návštěvníků na eurogopass.com</p></div><div className="analytics-fresh"><span className="live-dot" />Aktualizováno {new Date(data.generatedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</div></div>
+    <div className="analytics-heading"><div><span className="eyebrow">Prodeje {data.periodDays} dní · návštěvnost {data.trackingDays} dní</span><h1>PostHog</h1><p>Chování návštěvníků na eurogopass.com</p></div><div className="analytics-fresh"><span className="live-dot" />Aktualizováno {new Date(data.generatedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</div></div>
     <section className="analytics-metrics">
-      <article className="surface"><Users size={19} /><span>Návštěvníci</span><strong>{integerFormat.format(summary.visitors)}</strong><small>{comparisonText(summary.visitors, data.previous.visitors)} proti předchozímu období</small></article>
-      <article className="surface"><ShoppingCart size={19} /><span>Vstupy do checkoutu</span><strong>{integerFormat.format(summary.checkouts)}</strong><small>{comparisonText(summary.checkouts, data.previous.checkouts)} proti předchozímu období</small></article>
-      <article className="surface"><Activity size={19} /><span>Zaplacené objednávky</span><strong>{integerFormat.format(summary.paidOrders)}</strong><small>{comparisonText(summary.paidOrders, data.previous.paidOrders)} proti předchozímu období</small></article>
-      <article className="surface"><BarChart3 size={19} /><span>Tržby</span><strong>{summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong><small>{comparisonText(summary.revenue, data.previous.revenue)} proti předchozímu období</small></article>
+      <article className="surface"><Users size={19} /><span>Návštěvníci</span><strong>{integerFormat.format(summary.visitors)}</strong><small>{comparisonNote(summary.visitors, data.previous.visitors)}</small></article>
+      <article className="surface"><ShoppingCart size={19} /><span>Vstupy do checkoutu</span><strong>{integerFormat.format(summary.checkouts)}</strong><small>{comparisonNote(summary.checkouts, data.previous.checkouts)}</small></article>
+      <article className="surface"><Activity size={19} /><span>Zaplacené objednávky</span><strong>{integerFormat.format(summary.paidOrders)}</strong><small>{comparisonNote(summary.paidOrders, data.previous.paidOrders)}</small></article>
+      <article className="surface"><BarChart3 size={19} /><span>Tržby</span><strong>{summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong><small>{comparisonNote(summary.revenue, data.previous.revenue)}</small></article>
     </section>
     <nav className="analytics-tabs surface" aria-label="Sekce analytiky">{[
-      ["overview", "Přehled"], ["orders", "Objednávky"], ["affiliate", "Affiliate"], ["traffic", "Návštěvnost"], ["behavior", "Chování"],
+      ["overview", "Přehled"], ["orders", "Objednávky"], ["finance", "Finance"], ["affiliate", "Affiliate"], ["traffic", "Návštěvnost"], ["behavior", "Chování"],
     ].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key as AnalyticsTab)}>{label}</button>)}</nav>
     {tab === "overview" && <section className="analytics-layout">
       <article className="analytics-chart surface">
@@ -830,7 +840,7 @@ function PostHogDetail({ back }: { back: () => void }) {
       <article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Průchod objednávkou</h2><p>Počet událostí</p></div></div>{[
         ["Vstup do checkoutu", summary.checkouts],
         ["Zahájení platby", summary.paymentStarted],
-        ["Objednávka zaplacena", summary.paidOrders],
+        ["Objednávka zaplacena", summary.funnelPaidOrders],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Rychlý souhrn</h2><p>Aktivita návštěvníků</p></div></div>{[
         ["Návštěvy stránek", summary.pageviews], ["Relace", summary.sessions], ["Vyhledané trasy", summary.routeSearches], ["Spočítané trasy", summary.routesCalculated],
@@ -842,15 +852,29 @@ function PostHogDetail({ back }: { back: () => void }) {
     </section>}
     {tab === "orders" && <section className="analytics-tab-content">
       <div className="analytics-stat-grid">
-        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Supabase paid_at · přepočteno kurzem ECB" previous={{ current: summary.revenue, value: data.previous.revenue }} />
+        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Supabase paid_at · přepočteno kurzem ECB" previous={data.periodDays >= 30 ? { current: summary.revenue, value: data.previous.revenue } : undefined} />
         <AnalyticsStat label="Průměrná objednávka" value={summary.averageOrder.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="průměrná zaplacená částka" />
         <AnalyticsStat label="Plus" value={`${summary.flexOrders}×`} note={`${summary.paidOrders ? Math.round(summary.flexOrders / summary.paidOrders * 100) : 0} % objednávek`} />
         <AnalyticsStat label="Dálniční známky" value={integerFormat.format(summary.vignettes)} note="zaplacených položek" />
         <AnalyticsStat label="Mosty a tunely" value={integerFormat.format(summary.bridgeTolls)} note="zaplacených položek" />
       </div>
       <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta</h2><p>Od checkoutu k zaplacení</p></div></div>{[
-        ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zaplacené objednávky", summary.paidOrders],
+        ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zaplacené objednávky", summary.funnelPaidOrders],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Aktivita kroků</h2><p>Zobrazení částí checkoutu</p></div></div>{data.checkoutSteps.map(step => <div className="rank-row" key={step.name}><span>{analyticsLabel(step.name)}</span><i><b style={{ width: `${step.views / maxStep * 100}%` }} /></i><strong>{step.views}</strong></div>)}</article></div>
+    </section>}
+    {tab === "finance" && <section className="analytics-tab-content finance-analytics">
+      <div className="analytics-stat-grid">
+        <AnalyticsStat label="Hrubý obrat" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note={`${summary.paidOrders} zaplacených objednávek`} />
+        <AnalyticsStat label="Hodnota produktů" value={summary.productRevenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Produkty účtované zákazníkům" />
+        <AnalyticsStat label="Servisní poplatky" value={summary.processingRevenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Před Stripe poplatky a náklady" />
+        <AnalyticsStat label="Plus" value={summary.plusRevenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note={`${summary.flexOrders} Plus objednávky`} />
+        <AnalyticsStat label="Vlastní výnos před Stripe" value={summary.ownRevenueBeforePaymentFees.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Servisní poplatky + Plus" />
+        <AnalyticsStat label="Čistý zisk" value="Nelze určit" note="Chybí Stripe poplatky, refundace a reálné nákupní náklady" />
+      </div>
+      <div className="analytics-two-column">
+        <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Rozpad podle měn</h2><p>Částky skutečně účtované zákazníkům</p></div></div>{data.financeByCurrency.map(row => <div className="finance-currency" key={row.currency}><div><strong>{row.currency}</strong><small>{row.orders} objednávek</small></div><span><b>{row.gross.toLocaleString("cs-CZ", { style: "currency", currency: row.currency })}</b><small>produkty {row.products.toLocaleString("cs-CZ", { style: "currency", currency: row.currency })} · servis {row.processing.toLocaleString("cs-CZ", { style: "currency", currency: row.currency })}{row.plus ? ` · Plus ${row.plus.toLocaleString("cs-CZ", { style: "currency", currency: row.currency })}` : ""}</small></span></div>)}</article>
+        <article className="finance-limitations surface"><div className="analytics-card-head"><div><h2>Co zatím chybí</h2><p>Pro výpočet skutečného čistého zisku</p></div></div><div className="finance-missing"><span>Stripe transakční poplatky</span><strong>Nedostupné</strong></div><div className="finance-missing"><span>Refundace a chargebacky</span><strong>Nedostupné</strong></div><div className="finance-missing"><span>Skutečné nákupní náklady portálů</span><strong>Nedostupné</strong></div><p className="finance-note">Částka „Vlastní výnos před Stripe“ není čistý zisk. Po připojení Stripe API lze doplnit poplatky, refundace, payouty a čistý výnos.</p></article>
+      </div>
     </section>}
     {tab === "affiliate" && (affiliateState === "loading" ? <div className="analytics-loading surface">Načítám affiliate statistiky…</div> : affiliateState === "error" || !affiliateData ? <div className="analytics-loading surface error">Affiliate statistiky se nepodařilo načíst.</div> : <section className="analytics-tab-content affiliate-analytics">
       <div className="analytics-stat-grid">
