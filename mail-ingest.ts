@@ -346,14 +346,16 @@ async function saveHeartbeat(status: "ok" | "error", error?: unknown) {
 
 async function main() {
   const config = loadConfig();
-  const lockPath = resolve("runtime", config.backfillAll ? "gmail-backfill.lock" : "gmail-ingest.lock");
-  mkdirSync(dirname(lockPath), { recursive: true });
-  let lock: number;
-  try {
-    lock = openSync(lockPath, "wx");
-    writeFileSync(lock, String(process.pid));
-  } catch {
-    throw new Error(`Jiný Gmail ingest už běží (${lockPath})`);
+  const lockPath = resolve("runtime", "gmail-backfill.lock");
+  let lock: number | undefined;
+  if (config.backfillAll) {
+    mkdirSync(dirname(lockPath), { recursive: true });
+    try {
+      lock = openSync(lockPath, "wx");
+      writeFileSync(lock, String(process.pid));
+    } catch {
+      throw new Error(`Jiný historický Gmail import už běží (${lockPath})`);
+    }
   }
   console.log("Gmail document ingestor started", { intervalMs: config.intervalMs, lookbackDays: config.lookbackDays, backfillAll: config.backfillAll, senderRules: Object.keys(config.senderCountries).length });
   try {
@@ -370,8 +372,10 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, config.intervalMs));
     }
   } finally {
-    closeSync(lock);
-    unlinkSync(lockPath);
+    if (lock !== undefined) {
+      closeSync(lock);
+      unlinkSync(lockPath);
+    }
   }
 }
 
