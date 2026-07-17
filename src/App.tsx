@@ -27,6 +27,31 @@ import { orders as demoOrders, portalLinks, type Order, type OrderItem, type Ord
 
 type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "settings";
 
+function routeFromPath(pathname = window.location.pathname): { view: View; orderId?: string } {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  const orderAsset = path.match(/^\/orders\/([^/]+)\/(screenshots|documents)$/);
+  if (orderAsset) return { view: orderAsset[2] as "screenshots" | "documents", orderId: decodeURIComponent(orderAsset[1]) };
+  const order = path.match(/^\/orders\/([^/]+)$/);
+  if (order) return { view: "order", orderId: decodeURIComponent(order[1]) };
+  if (path === "/orders") return { view: "orders" };
+  if (path === "/analytics") return { view: "posthog" };
+  if (path === "/logs") return { view: "logs" };
+  if (path === "/screenshots") return { view: "screenshots" };
+  if (path === "/documents") return { view: "documents" };
+  return { view: "dashboard" };
+}
+
+function pathForView(view: View, orderId?: string) {
+  const encodedOrder = orderId ? encodeURIComponent(orderId) : "";
+  if (view === "orders") return "/orders";
+  if (view === "order" && encodedOrder) return `/orders/${encodedOrder}`;
+  if (view === "screenshots") return encodedOrder ? `/orders/${encodedOrder}/screenshots` : "/screenshots";
+  if (view === "documents") return encodedOrder ? `/orders/${encodedOrder}/documents` : "/documents";
+  if (view === "posthog") return "/analytics";
+  if (view === "logs") return "/logs";
+  return "/";
+}
+
 type PostHogAnalytics = {
   periodDays: number;
   trackingDays: number;
@@ -1338,9 +1363,22 @@ function FileTree({ kind, baseOrder, back }: { kind: TreeKind; baseOrder: Order;
 function FullLogs({ back }: { back: () => void }) { return <main className="page-shell log-page"><LiveLog expand={back} expanded /></main>; }
 
 function DashboardApp({ onLogout }: { onLogout: () => void }) {
-  const [view, setView] = useState<View>("dashboard");
+  const initialRoute = useMemo(() => routeFromPath(), []);
+  const [view, setView] = useState<View>(initialRoute.view);
+  const [routeOrderId, setRouteOrderId] = useState(initialRoute.orderId ?? "");
   const [orderData, setOrderData] = useState<Order[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order>(demoOrders[0]);
+  useEffect(() => {
+    window.history.replaceState({ egp: true, entry: true }, "", window.location.href);
+    const onPopState = () => {
+      const route = routeFromPath();
+      setView(route.view);
+      setRouteOrderId(route.orderId ?? "");
+      window.scrollTo({ top: 0 });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
   useEffect(() => {
     const loadOrders = () => fetch("/api/orders")
       .then(response => response.ok ? response.json() : Promise.reject())
@@ -1355,8 +1393,26 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     const timer = window.setInterval(() => void loadOrders(), 5_000);
     return () => window.clearInterval(timer);
   }, []);
-  const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0 }); };
-  const openOrder = (order: Order) => { setSelectedOrder(order); navigate("order"); };
+  const activeOrder = orderData.find(candidate => candidate.id === routeOrderId) ?? selectedOrder;
+  const navigate = (next: View, replace = false) => {
+    const orderId = ["order", "screenshots", "documents"].includes(next) ? activeOrder.id : undefined;
+    const path = pathForView(next, orderId);
+    window.history[replace ? "replaceState" : "pushState"]({ egp: true }, "", path);
+    setView(next);
+    setRouteOrderId(orderId ?? "");
+    window.scrollTo({ top: 0 });
+  };
+  const openOrder = (order: Order) => {
+    setSelectedOrder(order);
+    setRouteOrderId(order.id);
+    window.history.pushState({ egp: true }, "", pathForView("order", order.id));
+    setView("order");
+    window.scrollTo({ top: 0 });
+  };
+  const goBack = () => {
+    if (window.history.state?.egp && !window.history.state?.entry) window.history.back();
+    else navigate("dashboard", true);
+  };
   const markItemFulfilled = (itemId: string, fulfilledAt: string) => {
     const update = (order: Order): Order => {
       const items = order.items.map(item => item.id === itemId ? { ...item, status: "fulfilled" as const, fulfilledAt, failedAt: undefined, lastError: undefined } : item);
@@ -1364,9 +1420,9 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
       return { ...order, items, status };
     };
     setSelectedOrder(current => update(current));
-    setOrderData(current => current.map(order => order.id === selectedOrder.id ? update(order) : order));
+    setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={() => navigate("dashboard")} openOrder={openOrder} />}{view === "order" && <OrderDetail order={selectedOrder} back={() => navigate("dashboard")} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={() => navigate("dashboard")} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={selectedOrder} back={() => navigate("dashboard")} />}{view === "documents" && <FileTree kind="documents" baseOrder={selectedOrder} back={() => navigate("dashboard")} />}{view === "posthog" && <PostHogDetail back={() => navigate("dashboard")} />}</>;
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} back={goBack} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}</>;
 }
 
 export default function App() {
