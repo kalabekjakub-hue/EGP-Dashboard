@@ -35,6 +35,8 @@ export type Order = {
   createdAt: string;
   paidAt: string;
   total: number;
+  currency?: string;
+  profit?: number;
   plus: boolean;
   vehicleType?: string;
   fuelType?: string;

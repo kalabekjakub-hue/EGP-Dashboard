@@ -115,7 +115,7 @@ function authApi() {
 }
 
 type RawOrder = {
-  id: string; status: string; currency: string; amount_total_minor: number; email: string;
+  id: string; status: string; currency: string; amount_total_minor: number; processing_fee_minor: number; email: string;
   locale: string; registration_country: string; plate: string; created_at: string;
   paid_at?: string; fulfilled_at?: string; flex_enabled: boolean; order_number: string; fulfillment_status?: string;
   vehicle_type?: string; fuel_type?: string; vehicle_vin?: string;
@@ -186,7 +186,7 @@ function supabaseReadApi() {
           const { url, key } = loadWorkerEnv();
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
           const headers = { apikey: key, Authorization: `Bearer ${key}` };
-          const orderSelect = "id,status,currency,amount_total_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,invoice_pdf_path,last_error,vehicle_type,fuel_type,vehicle_vin";
+          const orderSelect = "id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,invoice_pdf_path,last_error,vehicle_type,fuel_type,vehicle_vin";
           const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=50`, { headers });
           if (!orderResponse.ok) throw new Error(`Orders API ${orderResponse.status}`);
           const rawOrders = await orderResponse.json() as RawOrder[];
@@ -248,11 +248,9 @@ function supabaseReadApi() {
               id: order.id, number: order.order_number, plate: order.plate,
               registrationCountry: order.registration_country, registrationCode: order.registration_country.toLowerCase(),
               email: order.email, createdAt: formatDate(order.created_at), paidAt: formatDate(order.paid_at),
-              // Item prices are EUR snapshots. `amount_total_minor` is denominated
-              // in order.currency and cannot be displayed as EUR without conversion.
-              total: items.length
-                ? items.reduce((sum, item) => sum + item.price, 0)
-                : order.currency.toUpperCase() === "EUR" ? order.amount_total_minor / 100 : 0,
+              total: order.amount_total_minor / 100,
+              currency: order.currency,
+              profit: order.processing_fee_minor / 100,
               vehicleType: order.vehicle_type, fuelType: order.fuel_type, vin: order.vehicle_vin,
               plus: order.flex_enabled,
               locale: order.locale,
