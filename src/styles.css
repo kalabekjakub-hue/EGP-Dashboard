@@ -377,3 +377,4 @@
 
 .tree .level-3{padding-left:58px}
 .tree .level-3 .flag{width:18px;height:12px}
+.plus-badge{width:max-content;margin-top:8px;padding:5px 9px;border:1px solid #bfe8c3;border-radius:99px;background:#e9f9ea;color:var(--green-dark);display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;letter-spacing:.02em}

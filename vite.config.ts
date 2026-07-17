@@ -254,6 +254,7 @@ function supabaseReadApi() {
                 ? items.reduce((sum, item) => sum + item.price, 0)
                 : order.currency.toUpperCase() === "EUR" ? order.amount_total_minor / 100 : 0,
               vehicleType: order.vehicle_type, fuelType: order.fuel_type, vin: order.vehicle_vin,
+              plus: order.flex_enabled,
               locale: order.locale,
               status, items,
               createdAtIso: order.created_at,

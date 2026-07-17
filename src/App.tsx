@@ -16,6 +16,7 @@ import {
   LogOut,
   Maximize2,
   Minimize2,
+  Plus,
   Search,
   Settings,
   ShoppingCart,
@@ -843,7 +844,7 @@ function PostHogDetail({ back }: { back: () => void }) {
       <div className="analytics-stat-grid">
         <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Supabase paid_at · přepočteno kurzem ECB" previous={{ current: summary.revenue, value: data.previous.revenue }} />
         <AnalyticsStat label="Průměrná objednávka" value={summary.averageOrder.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="průměrná zaplacená částka" />
-        <AnalyticsStat label="Flex" value={`${summary.flexOrders}×`} note={`${summary.paidOrders ? Math.round(summary.flexOrders / summary.paidOrders * 100) : 0} % objednávek`} />
+        <AnalyticsStat label="Plus" value={`${summary.flexOrders}×`} note={`${summary.paidOrders ? Math.round(summary.flexOrders / summary.paidOrders * 100) : 0} % objednávek`} />
         <AnalyticsStat label="Dálniční známky" value={integerFormat.format(summary.vignettes)} note="zaplacených položek" />
         <AnalyticsStat label="Mosty a tunely" value={integerFormat.format(summary.bridgeTolls)} note="zaplacených položek" />
       </div>
@@ -1094,7 +1095,7 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
     <main className="page-shell">
       <BackButton onClick={back} />
       <section className={`detail-hero ${order.status}`}>
-        <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p></div></div>
+        <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p>{order.plus && <span className="plus-badge"><Plus size={13} strokeWidth={3} /> Plus</span>}</div></div>
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{money(order.total)}</strong><small>Zaplaceno {order.paidAt}</small></div>
         <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemId(""); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
