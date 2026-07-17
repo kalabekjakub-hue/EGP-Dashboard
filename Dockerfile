@@ -11,7 +11,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/server.ts /app/vite.config.ts /app/mail-ingest.ts ./
+COPY --from=build /app/server.ts /app/server-config.ts /app/vite.config.ts /app/mail-ingest.ts ./
 COPY --from=build /app/src ./src
 COPY --from=build /app/config ./config
 COPY --from=build /app/tsconfig*.json ./
