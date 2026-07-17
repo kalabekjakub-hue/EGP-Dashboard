@@ -10,8 +10,8 @@ services:
       NODE_ENV: production
       HOST: 127.0.0.1
       PORT: 3100
-      ANALYTICS_PRODUCTION_SINCE: 2026-06-25T00:00:00Z
-      ANALYTICS_TRACKING_SINCE: 2026-07-03T11:53:00Z
+      ANALYTICS_PRODUCTION_SINCE: "2026-06-25T00:00:00Z"
+      ANALYTICS_TRACKING_SINCE: "2026-07-03T11:53:00Z"
       GMAIL_HEALTH_FILE: /app/runtime/gmail-health.json
     volumes:
       - ./runtime:/app/runtime:ro
