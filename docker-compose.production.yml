@@ -30,8 +30,10 @@ services:
       - secrets/gmail.env
     environment:
       GMAIL_HEALTH_FILE: /app/runtime/gmail-health.json
-      MAIL_INGEST_INTERVAL_MS: 60000
+      MAIL_INGEST_INTERVAL_MS: 15000
       MAIL_INGEST_LOOKBACK_DAYS: 30
+      MAIL_INGEST_MAX_MESSAGES_PER_CYCLE: 40
+      MAIL_ORDER_WAIT_MS: 21600000
       MAIL_SENDER_COUNTRY_MAP_FILE: config/mail-senders.json
     volumes:
       - ./runtime:/app/runtime

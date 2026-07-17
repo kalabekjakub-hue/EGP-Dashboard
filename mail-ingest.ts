@@ -19,6 +19,8 @@ type Config = {
   intervalMs: number;
   lookbackDays: number;
   reviewRetryMs: number;
+  maxMessagesPerCycle: number;
+  orderWaitMs: number;
   senderCountries: Record<string, string>;
   backfillAll: boolean;
 };
@@ -26,6 +28,7 @@ type Config = {
 type GmailList = { messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string };
 type GmailMessage = { id: string; threadId: string; raw: string; internalDate?: string };
 type RecentOrder = { id: string; order_number?: string; plate: string; created_at: string; paid_at?: string; itemCountries: Set<string> };
+type OrderTrigger = { orderIds: Set<string>; countries: Set<string>; searchAfter: Date };
 
 function requireValue(value: string | undefined, name: string) {
   if (!value) throw new Error(`${name} is required`);
@@ -53,6 +56,8 @@ function loadConfig(): Config {
     intervalMs: Math.max(15_000, Number(env.MAIL_INGEST_INTERVAL_MS || 60_000)),
     lookbackDays: Math.max(1, Number(env.MAIL_INGEST_LOOKBACK_DAYS || 30)),
     reviewRetryMs: Math.max(60_000, Number(env.MAIL_REVIEW_RETRY_MS || 6 * 60 * 60_000)),
+    maxMessagesPerCycle: Math.max(1, Number(env.MAIL_INGEST_MAX_MESSAGES_PER_CYCLE || 40)),
+    orderWaitMs: Math.max(15 * 60_000, Number(env.MAIL_ORDER_WAIT_MS || 6 * 60 * 60_000)),
     senderCountries: Object.fromEntries(Object.entries(senderCountries).map(([key, value]) => [key.toLowerCase(), value.toUpperCase()])),
     backfillAll: process.argv.includes("--all"),
   };
@@ -89,7 +94,15 @@ async function gmailFetch(url: string, token: string) {
     const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (response.status !== 429 && response.status < 500) return response;
     const retryAfter = Number(response.headers.get("retry-after"));
-    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2 ** attempt * 1000;
+    const payload = await response.clone().json().catch(() => undefined) as { error?: { message?: string } } | undefined;
+    const retryAt = payload?.error?.message?.match(/Retry after ([0-9T:.+-]+Z?)/i)?.[1];
+    const retryAtMs = retryAt ? Date.parse(retryAt) - Date.now() : Number.NaN;
+    const delayMs = Number.isFinite(retryAtMs) && retryAtMs > 0
+      ? Math.min(retryAtMs + 1_000, 60 * 60_000)
+      : Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 2 ** attempt * 1000;
+    console.warn("Gmail API throttled", { status: response.status, retryInMs: delayMs, attempt: attempt + 1 });
     await new Promise(resolve => setTimeout(resolve, delayMs));
   }
   return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -119,12 +132,23 @@ async function gmailAccessToken(config: Config) {
   return requireValue(payload.access_token, "Gmail access token");
 }
 
-async function gmailMessages(config: Config, token: string) {
+async function gmailMessages(config: Config, token: string, trigger?: OrderTrigger) {
   const output: Array<{ id: string; threadId: string }> = [];
   let pageToken: string | undefined;
   do {
     const query = new URLSearchParams({ maxResults: "500" });
-    if (!config.backfillAll) query.set("q", `newer_than:${config.lookbackDays}d`);
+    if (!config.backfillAll) {
+      // Do not scan the entire mailbox every minute. Restrict the Gmail-side
+      // search to senders that can actually produce fulfillment documents.
+      const senders = Object.entries(config.senderCountries)
+        .filter(([, country]) => !trigger || trigger.countries.has(country))
+        .map(([sender]) => sender);
+      const senderQuery = senders.length ? ` from:(${senders.join(" OR ")})` : "";
+      const timeQuery = trigger
+        ? `after:${Math.floor(trigger.searchAfter.getTime() / 1000)}`
+        : `newer_than:${config.lookbackDays}d`;
+      query.set("q", `${timeQuery}${senderQuery}`);
+    }
     if (pageToken) query.set("pageToken", pageToken);
     const response = await gmailFetch(`https://gmail.googleapis.com/gmail/v1/users/${encodeURIComponent(config.gmailUserId)}/messages?${query}`, token);
     if (!response.ok) throw new Error(`Gmail list ${response.status}`);
@@ -157,12 +181,14 @@ async function getRawMessage(config: Config, token: string, id: string) {
   return response.json() as Promise<GmailMessage>;
 }
 
-async function loadRecentOrders(config: Config): Promise<RecentOrder[]> {
+async function loadRecentOrders(config: Config, orderIds?: Set<string>): Promise<RecentOrder[]> {
   const since = new Date(Date.now() - config.lookbackDays * 86_400_000).toISOString();
   const headers = supabaseHeaders(config);
   const orders: Array<{ id: string; order_number?: string; plate: string; created_at: string; paid_at?: string }> = [];
   for (let offset = 0;; offset += 1000) {
-    const dateFilter = config.backfillAll ? "" : `&created_at=gte.${encodeURIComponent(since)}`;
+    const dateFilter = orderIds?.size
+      ? `&id=in.${encodeURIComponent(`(${[...orderIds].join(",")})`)}`
+      : config.backfillAll ? "" : `&created_at=gte.${encodeURIComponent(since)}`;
     const ordersResponse = await fetch(`${config.supabaseUrl}/rest/v1/orders?select=id,order_number,plate,created_at,paid_at${dateFilter}&order=created_at.desc&limit=1000&offset=${offset}`, { headers });
     if (!ordersResponse.ok) throw new Error(`Orders lookup ${ordersResponse.status}`);
     const page = await ordersResponse.json() as typeof orders;
@@ -184,6 +210,40 @@ async function loadRecentOrders(config: Config): Promise<RecentOrder[]> {
     ...order,
     itemCountries: new Set(rows.filter(row => row.order_id === order.id).map(row => row.country_code.toUpperCase())),
   }));
+}
+
+async function pendingOrderTrigger(config: Config): Promise<OrderTrigger | undefined> {
+  if (config.backfillAll) return undefined;
+  const headers = supabaseHeaders(config);
+  const since = new Date(Date.now() - config.orderWaitMs).toISOString();
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/orders?select=id,paid_at&paid_at=gte.${encodeURIComponent(since)}&order=paid_at.desc&limit=200`, { headers });
+  if (!response.ok) throw new Error(`Order trigger lookup ${response.status}`);
+  const orders = await response.json() as Array<{ id: string; paid_at: string }>;
+  if (!orders.length) return undefined;
+
+  const ids = encodeURIComponent(`(${orders.map(order => order.id).join(",")})`);
+  const [itemsResponse, tollsResponse, documentsResponse] = await Promise.all([
+    fetch(`${config.supabaseUrl}/rest/v1/order_items?select=order_id,country_code&order_id=in.${ids}`, { headers }),
+    fetch(`${config.supabaseUrl}/rest/v1/order_bridge_toll_items?select=order_id,country_code&order_id=in.${ids}`, { headers }),
+    fetch(`${config.supabaseUrl}/rest/v1/order_documents?select=order_id,country_code&source=eq.email&document_type=eq.original_email&order_id=in.${ids}`, { headers }),
+  ]);
+  if (!itemsResponse.ok || !tollsResponse.ok || !documentsResponse.ok) throw new Error("Order trigger item lookup failed");
+  const items = [
+    ...await itemsResponse.json() as Array<{ order_id: string; country_code: string }>,
+    ...await tollsResponse.json() as Array<{ order_id: string; country_code: string }>,
+  ];
+  const documents = await documentsResponse.json() as Array<{ order_id: string; country_code: string }>;
+  const supportedCountries = new Set(Object.values(config.senderCountries));
+  const pendingOrders = orders.filter(order => items.some(item =>
+    item.order_id === order.id
+    && supportedCountries.has(item.country_code.toUpperCase())
+    && !documents.some(document => document.order_id === order.id && document.country_code === item.country_code.toUpperCase())
+  ));
+  if (!pendingOrders.length) return undefined;
+  const orderIds = new Set(pendingOrders.map(order => order.id));
+  const countries = new Set(items.filter(item => orderIds.has(item.order_id)).map(item => item.country_code.toUpperCase()).filter(country => supportedCountries.has(country)));
+  const earliestPaidAt = Math.min(...pendingOrders.map(order => Date.parse(order.paid_at)));
+  return { orderIds, countries, searchAfter: new Date(earliestPaidAt - 60 * 60_000) };
 }
 
 function matchOrder(orders: RecentOrder[], country: string, searchable: string, receivedAt: Date) {
@@ -321,13 +381,21 @@ async function processMessage(config: Config, token: string, info: { id: string;
 }
 
 async function runOnce(config: Config) {
+  const trigger = await pendingOrderTrigger(config);
+  if (!config.backfillAll && !trigger) {
+    console.log("Gmail idle", { reason: "no_paid_order_waiting_for_email" });
+    return;
+  }
   const token = await gmailAccessToken(config);
-  const messages = await gmailMessages(config, token);
+  const messages = await gmailMessages(config, token, trigger);
   const done = await processedIds(config, messages.map(message => message.id));
-  const pending = messages.filter(message => !done.has(message.id));
+  const allPending = messages.filter(message => !done.has(message.id));
+  // Gmail lists newest messages first; prioritize fresh confirmations while a
+  // larger historical backlog is drained over subsequent cycles.
+  const pending = config.backfillAll ? allPending : allPending.slice(0, config.maxMessagesPerCycle);
   console.log("Gmail scan", { messages: messages.length, alreadyProcessed: done.size, pending: pending.length });
   if (!pending.length) return;
-  const orders = await loadRecentOrders(config);
+  const orders = await loadRecentOrders(config, trigger?.orderIds);
   for (const message of pending.reverse()) {
     try {
       await processMessage(config, token, message, orders);
