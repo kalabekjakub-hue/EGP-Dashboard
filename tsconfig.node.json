@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "server.ts", "server-config.ts", "mail-ingest.ts", "src/passageCatalog.ts"]
 }

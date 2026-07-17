@@ -7,5 +7,10 @@ vite.config.d.ts
 .env.local
 vite.stdout.log
 vite.stderr.log
+secrets/
+runtime/
+mail-ingest.*.log
+gmail-oauth-client.json
+gmail-auth.*.log
 dashboard-current.png
 dashboard-qa.png

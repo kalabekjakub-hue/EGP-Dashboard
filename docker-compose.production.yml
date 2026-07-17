@@ -1,0 +1,61 @@
+services:
+  dashboard:
+    build: .
+    container_name: egp-admin-dashboard
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - secrets/production.env
+    environment:
+      NODE_ENV: production
+      HOST: 127.0.0.1
+      PORT: 3100
+      GMAIL_HEALTH_FILE: /app/runtime/gmail-health.json
+    volumes:
+      - ./runtime:/app/runtime:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  gmail-ingest:
+    build: .
+    container_name: egp-admin-gmail
+    restart: unless-stopped
+    network_mode: host
+    command: ["npm", "run", "ingest:mail"]
+    env_file:
+      - secrets/production.env
+      - secrets/gmail.env
+    environment:
+      GMAIL_HEALTH_FILE: /app/runtime/gmail-health.json
+      MAIL_INGEST_INTERVAL_MS: 60000
+      MAIL_INGEST_LOOKBACK_DAYS: 30
+      MAIL_SENDER_COUNTRY_MAP_FILE: config/mail-senders.json
+    volumes:
+      - ./runtime:/app/runtime
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: egp-admin-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

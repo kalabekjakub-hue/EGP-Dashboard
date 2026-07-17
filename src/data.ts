@@ -4,8 +4,10 @@ export type OrderItem = {
   id?: string;
   source?: "order_items" | "order_bridge_toll_items";
   country: string;
+  displayCode?: string;
   flag: string;
   product: string;
+  itemKind?: "vignette" | "bridge" | "tunnel" | "toll_section";
   validFrom: string;
   validTo: string;
   price: number;

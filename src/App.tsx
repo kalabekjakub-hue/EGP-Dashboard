@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -7,11 +7,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
-  Copy,
   Clock3,
   Download,
   ExternalLink,
-  FileArchive,
   FileText,
   Folder,
   FolderOpen,
@@ -73,6 +71,18 @@ type AffiliateAnalytics = {
   partners: Array<{ id: string; code: string; name: string; status: string; commissionRate: number; orders: number; paidOrders: number; revenue: number; commission: number }>;
 };
 
+type ManualFulfillmentAudit = {
+  id: string;
+  order_id: string;
+  item_id: string;
+  item_source: "order_items" | "order_bridge_toll_items";
+  country_code: string | null;
+  actor_email: string;
+  previous_status: string | null;
+  fulfilled_at: string;
+  created_at: string;
+};
+
 function usePostHogAnalytics() {
   const [data, setData] = useState<PostHogAnalytics | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -111,17 +121,6 @@ function useAffiliateAnalytics() {
 }
 
 const integerFormat = new Intl.NumberFormat("cs-CZ");
-
-function chartPath(values: number[], width: number, height: number, padding = 6, scaleMax?: number) {
-  if (!values.length) return "";
-  const max = scaleMax ?? Math.max(...values, 1);
-  const step = values.length > 1 ? (width - padding * 2) / (values.length - 1) : 0;
-  return values.map((value, index) => {
-    const x = padding + index * step;
-    const y = height - padding - (value / max) * (height - padding * 2);
-    return `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
-  }).join(" ");
-}
 
 type WorkerLogEntry = {
   ts: string;
@@ -478,7 +477,7 @@ function statusDate(value: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function Header({ goHome, navigate }: { goHome: () => void; navigate: (view: View) => void }) {
+function Header({ goHome, navigate, onLogout }: { goHome: () => void; navigate: (view: View) => void; onLogout: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [worker, setWorker] = useState<"egp" | "wise" | null>(null);
@@ -576,7 +575,7 @@ function Header({ goHome, navigate }: { goHome: () => void; navigate: (view: Vie
               </div>}
               <button onClick={() => { navigate("screenshots"); setMenuOpen(false); setLinksOpen(false); }}><FolderOpen size={16} /> Screenshoty</button>
               <button onClick={() => { navigate("documents"); setMenuOpen(false); setLinksOpen(false); }}><FileText size={16} /> Doklady</button>
-              <button><LogOut size={16} /> Odhlásit se</button>
+              <button onClick={onLogout}><LogOut size={16} /> Odhlásit se</button>
             </div>
           )}
         </div>
@@ -599,8 +598,9 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
         <strong className="price">{money(order.total)}</strong>
       </div>
       <div className="item-preview">
-        {order.items.map((item) => <div key={item.country}><Flag code={item.country} /><b>{item.country}</b><span>{item.validFrom} – {item.validTo}</span></div>)}
+        {order.items.map((item) => <div key={item.id ?? `${item.source}-${item.country}-${item.product}`}><Flag code={item.country} /><b>{item.product}</b><span>{item.displayCode ?? item.country}</span></div>)}
       </div>
+      {order.status === "awaiting_payment" && <div className="awaiting-created"><Clock3 size={12} />Vytvořeno {order.createdAt}</div>}
       {order.status === "processing" && <div className="processing-line"><span className="live-pulse" />{order.items.find(i => i.status === "processing")?.country} · {order.items.find(i => i.status === "processing")?.currentStep}</div>}
     </button>
   );
@@ -610,19 +610,19 @@ function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; op
   const [query, setQuery] = useState("");
   const normalized = query.toUpperCase().replace(/[\s-]/g, "");
   const filtered = orderData.filter(order => !query || [order.id, order.plate.replace(/[\s-]/g, ""), order.email].some(value => value.toUpperCase().includes(normalized)));
+  const previewOrders = filtered
+    .filter(order => Boolean(order.paidAtIso) && order.status !== "awaiting_payment")
+    .sort((a, b) => Date.parse(b.paidAtIso ?? "") - Date.parse(a.paidAtIso ?? ""))
+    .slice(0, 3);
   return (
     <aside className="orders-column surface">
       <label className="search"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Hledat SPZ, ID nebo e-mail" /></label>
       <div className="order-list">
-        {filtered.length ? filtered.slice(0, 3).map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />) : <div className="empty">Žádná objednávka nenalezena</div>}
+        {previewOrders.length ? previewOrders.map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />) : <div className="empty">Žádná zaplacená objednávka nenalezena</div>}
       </div>
       <button className="all-orders" onClick={showAll}>Všechny objednávky</button>
     </aside>
   );
-}
-
-function PortalStrip() {
-  return <div className="portal-strip surface">{portalLinks.map(portal => <a key={portal.code} href={portal.url} target="_blank" rel="noreferrer" aria-label={portal.code}><Flag code={portal.code} /></a>)}</div>;
 }
 
 function PostHogPreview({ onOpen }: { onOpen: () => void }) {
@@ -669,12 +669,6 @@ function secondsBetween(start?: string, end?: string) {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
-function readableAverage(seconds: number) {
-  if (!seconds) return "–";
-  if (seconds < 60) return `${Math.round(seconds)} s`;
-  return `${Math.floor(seconds / 60)} min ${Math.round(seconds % 60)} s`;
-}
-
 function useWorkerStatusSnapshot() {
   const [status, setStatus] = useState<WorkersStatus | null>(null);
   useEffect(() => {
@@ -693,7 +687,11 @@ function useWorkerStatusSnapshot() {
 function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | null) {
   const today = pragueDay(new Date().toISOString());
   const todayOrders = orderData.filter(order => pragueDay(order.createdAtIso) === today);
-  const paidToday = orderData.filter(order => pragueDay(order.paidAtIso) === today);
+  const paidToday = orderData.filter(order =>
+    order.status !== "awaiting_payment" &&
+    Boolean(order.paidAtIso) &&
+    pragueDay(order.paidAtIso) === today
+  );
   const todayItems = todayOrders.flatMap(order => order.items.map(item => ({ order, item })));
   const durations = todayItems
     .map(({ item }) => secondsBetween(item.engineSubmittedAt, item.fulfilledAt ?? item.failedAt))
@@ -705,11 +703,11 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
   for (const order of orderData) {
     for (const item of order.items) {
       const prefix = `${item.country} · ${order.plate}`;
-      if (item.status === "failed") incidents.push({ id: `failed:${order.id}:${item.country}`, tone: "error", title: `${prefix} selhalo`, detail: item.lastError || "Položka skončila chybou", orderId: order.id });
-      if (order.paidAtIso && item.status === "waiting" && !item.engineSubmittedAt && minutesSince(order.paidAtIso) > 5) incidents.push({ id: `unclaimed:${order.id}:${item.country}`, tone: "warning", title: `${prefix} čeká na worker`, detail: "Zaplaceno, ale položka nebyla převzata", orderId: order.id });
-      if (item.status === "processing" && item.engineSubmittedAt && minutesSince(item.engineSubmittedAt) > 15) incidents.push({ id: `slow:${order.id}:${item.country}`, tone: "warning", title: `${prefix} trvá dlouho`, detail: `Zpracování běží ${Math.round(minutesSince(item.engineSubmittedAt))} minut`, orderId: order.id });
-      if (item.status === "fulfilled" && item.fulfilledAt && minutesSince(item.fulfilledAt) < 24 * 60 && item.pdfAvailable === false) incidents.push({ id: `pdf:${order.id}:${item.country}`, tone: "warning", title: `${prefix} nemá doklad`, detail: "V Supabase chybí PDF dokladu", orderId: order.id, target: "documents" });
-      if (item.status === "fulfilled" && item.fulfilledAt && minutesSince(item.fulfilledAt) < 24 * 60 && item.screenshotsAvailable === false) incidents.push({ id: `shots:${order.id}:${item.country}`, tone: "warning", title: `${prefix} nemá screenshoty`, detail: "Worker neuložil screenshoty kroků", orderId: order.id, target: "screenshots" });
+      if (item.status === "failed" && pragueDay(item.failedAt) === today) incidents.push({ id: `failed:${order.id}:${item.country}`, tone: "error", title: `${prefix} selhalo`, detail: item.lastError || "Položka skončila chybou", orderId: order.id });
+      if (order.paidAtIso && pragueDay(order.paidAtIso) === today && item.status === "waiting" && !item.engineSubmittedAt && minutesSince(order.paidAtIso) > 5) incidents.push({ id: `unclaimed:${order.id}:${item.country}`, tone: "warning", title: `${prefix} čeká na worker`, detail: "Zaplaceno, ale položka nebyla převzata", orderId: order.id });
+      if (item.status === "processing" && item.engineSubmittedAt && pragueDay(item.engineSubmittedAt) === today && minutesSince(item.engineSubmittedAt) > 15) incidents.push({ id: `slow:${order.id}:${item.country}`, tone: "warning", title: `${prefix} trvá dlouho`, detail: `Zpracování běží ${Math.round(minutesSince(item.engineSubmittedAt))} minut`, orderId: order.id });
+      if (item.status === "fulfilled" && item.fulfilledAt && pragueDay(item.fulfilledAt) === today && item.pdfAvailable === false) incidents.push({ id: `pdf:${order.id}:${item.country}`, tone: "warning", title: `${prefix} nemá doklad`, detail: "V Supabase chybí PDF dokladu", orderId: order.id, target: "documents" });
+      if (item.status === "fulfilled" && item.fulfilledAt && pragueDay(item.fulfilledAt) === today && item.screenshotsAvailable === false) incidents.push({ id: `shots:${order.id}:${item.country}`, tone: "warning", title: `${prefix} nemá screenshoty`, detail: "Worker neuložil screenshoty kroků", orderId: order.id, target: "screenshots" });
     }
   }
   if (workers && !workers.egp.ok) incidents.unshift({ id: "worker:egp", tone: "error", title: "EGP Worker neodpovídá", detail: "Otevři živý log a diagnostiku", target: "logs" });
@@ -717,7 +715,7 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
   const completed = todayOrders.filter(order => order.status === "fulfilled").length;
   const failed = todayOrders.filter(order => order.status === "failed").length;
   return {
-    orders: completed,
+    orders: todayOrders.length,
     revenue: paidToday.reduce((sum, order) => sum + order.total, 0),
     completed,
     failed,
@@ -783,8 +781,21 @@ function PostHogDetail({ back }: { back: () => void }) {
   const maxSource = Math.max(...data.sources.map(source => source.visitors), 1);
   const maxStep = Math.max(...data.checkoutSteps.map(step => step.views), 1);
   const chartMax = Math.max(...data.daily.map(day => day.checkouts), ...data.daily.map(day => day.paidOrders), 1);
-  const checkoutPath = chartPath(data.daily.map(day => day.checkouts), 800, 220, 14, chartMax);
-  const paidPath = chartPath(data.daily.map(day => day.paidOrders), 800, 220, 14, chartMax);
+  const chartWidth = 800;
+  const chartHeight = 240;
+  const chartPlot = { left: 52, right: 14, top: 12, bottom: 32 };
+  const chartScaleMax = Math.max(4, Math.ceil(chartMax / 4) * 4);
+  const dailyChartPath = (values: number[]) => values.map((value, index) => {
+    const plotWidth = chartWidth - chartPlot.left - chartPlot.right;
+    const plotHeight = chartHeight - chartPlot.top - chartPlot.bottom;
+    const x = chartPlot.left + (values.length > 1 ? index / (values.length - 1) * plotWidth : plotWidth / 2);
+    const y = chartPlot.top + (1 - value / chartScaleMax) * plotHeight;
+    return `${index ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(" ");
+  const checkoutPath = dailyChartPath(data.daily.map(day => day.checkouts));
+  const paidPath = dailyChartPath(data.daily.map(day => day.paidOrders));
+  const yTicks = Array.from({ length: 5 }, (_, index) => chartScaleMax - index * chartScaleMax / 4);
+  const xTickIndexes = Array.from(new Set([0, 1, 2, 3, 4].map(index => Math.round(index * Math.max(data.daily.length - 1, 0) / 4))));
   const firstDate = data.daily[0]?.date;
   const lastDate = data.daily.at(-1)?.date;
   const formatShortDate = (value?: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) : "–";
@@ -803,7 +814,17 @@ function PostHogDetail({ back }: { back: () => void }) {
     {tab === "overview" && <section className="analytics-layout">
       <article className="analytics-chart surface">
         <div className="analytics-card-head"><div><h2>Aktivita po dnech</h2><p>{formatShortDate(firstDate)} – {formatShortDate(lastDate)}</p></div><div className="chart-legend"><span className="checkout">Checkout</span><span className="paid">Zaplaceno</span></div></div>
-        <svg viewBox="0 0 800 220" preserveAspectRatio="none" aria-label="Vývoj checkoutů a zaplacených objednávek"><line x1="14" y1="206" x2="786" y2="206" /><path className="checkout" d={checkoutPath} /><path className="paid" d={paidPath} /></svg>
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" role="img" aria-label="Vývoj checkoutů a zaplacených objednávek s číselnou a datumovou osou">
+          {yTicks.map((tick, index) => {
+            const y = chartPlot.top + index * (chartHeight - chartPlot.top - chartPlot.bottom) / 4;
+            return <g className="chart-grid-row" key={tick}><line x1={chartPlot.left} y1={y} x2={chartWidth - chartPlot.right} y2={y} /><text x={chartPlot.left - 10} y={y + 3} textAnchor="end">{integerFormat.format(tick)}</text></g>;
+          })}
+          {xTickIndexes.map(index => {
+            const x = chartPlot.left + (data.daily.length > 1 ? index / (data.daily.length - 1) * (chartWidth - chartPlot.left - chartPlot.right) : (chartWidth - chartPlot.left - chartPlot.right) / 2);
+            return <g className="chart-x-tick" key={index}><line x1={x} y1={chartHeight - chartPlot.bottom} x2={x} y2={chartHeight - chartPlot.bottom + 5} /><text x={x} y={chartHeight - 9} textAnchor={index === 0 ? "start" : index === data.daily.length - 1 ? "end" : "middle"}>{formatShortDate(data.daily[index]?.date)}</text></g>;
+          })}
+          <path className="checkout" d={checkoutPath} /><path className="paid" d={paidPath} />
+        </svg>
       </article>
       <article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Průchod objednávkou</h2><p>Počet událostí</p></div></div>{[
         ["Vstup do checkoutu", summary.checkouts],
@@ -820,7 +841,7 @@ function PostHogDetail({ back }: { back: () => void }) {
     </section>}
     {tab === "orders" && <section className="analytics-tab-content">
       <div className="analytics-stat-grid">
-        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="z událostí order_paid" previous={{ current: summary.revenue, value: data.previous.revenue }} />
+        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="order_paid · přepočteno kurzem ECB" previous={{ current: summary.revenue, value: data.previous.revenue }} />
         <AnalyticsStat label="Průměrná objednávka" value={summary.averageOrder.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="průměrná zaplacená částka" />
         <AnalyticsStat label="Flex" value={`${summary.flexOrders}×`} note={`${summary.paidOrders ? Math.round(summary.flexOrders / summary.paidOrders * 100) : 0} % objednávek`} />
         <AnalyticsStat label="Dálniční známky" value={integerFormat.format(summary.vignettes)} note="zaplacených položek" />
@@ -936,6 +957,7 @@ function LiveLog({ expand, expanded = false }: { expand: () => void; expanded?: 
         level: entry.level,
         text: formatWorkerLog(entry),
       }));
+  const latestLogAt = liveLogs[0]?.ts;
   const humanGroups: HumanLogGroup[] = buildHumanLogGroups(liveLogs);
 
   const selectTechnicalLog = (eventId: string) => {
@@ -951,7 +973,7 @@ function LiveLog({ expand, expanded = false }: { expand: () => void; expanded?: 
 
   return (
     <section className="live-log surface">
-      <div className="log-head"><div><span className={`live-dot ${connection}`} /><strong>Živý log</strong>{connection !== "live" && <span className="paused">{connection === "connecting" ? "Připojuji" : "Worker je offline"}</span>}{paused && <span className="paused">Pozastaveno</span>}</div><button onClick={expand}>{expanded ? "Zmenšit" : "Zvětšit"}{expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button></div>
+      <div className="log-head"><div><span className={`live-dot ${connection}`} /><strong>Živý log</strong>{connection === "live" && latestLogAt && <span className="log-last-event">Poslední událost {statusDate(latestLogAt)}</span>}{connection !== "live" && <span className="paused">{connection === "connecting" ? "Připojuji" : "Worker je offline"}</span>}{paused && <span className="paused">Pozastaveno</span>}</div><button onClick={expand}>{expanded ? "Zmenšit" : "Zvětšit"}{expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button></div>
       <div className="log-grid">
         <div className="human-log">
           <h3>Průběh</h3>
@@ -1016,6 +1038,8 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
   const [fulfillOpen, setFulfillOpen] = useState(false);
   const [fulfillItemId, setFulfillItemId] = useState("");
   const [fulfillState, setFulfillState] = useState<"idle" | "saving" | "error">("idle");
+  const [manualAudit, setManualAudit] = useState<ManualFulfillmentAudit[]>([]);
+  const [auditVersion, setAuditVersion] = useState(0);
 
   const confirmFulfilled = async () => {
     const item = order.items.find(candidate => candidate.id === fulfillItemId);
@@ -1029,6 +1053,7 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
       setFulfillOpen(false);
       setFulfillItemId("");
       setFulfillState("idle");
+      setAuditVersion(version => version + 1);
     } catch {
       setFulfillState("error");
     }
@@ -1056,29 +1081,50 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
     return () => { active = false; };
   }, [order.id]);
 
+  useEffect(() => {
+    let active = true;
+    void fetch(`/api/manual-fulfillment-audit?orderId=${encodeURIComponent(order.id)}`, { headers: { Accept: "application/json" } })
+      .then(response => response.ok ? response.json() as Promise<{ entries?: ManualFulfillmentAudit[] }> : Promise.reject())
+      .then(payload => { if (active) setManualAudit(Array.isArray(payload.entries) ? payload.entries : []); })
+      .catch(() => { if (active) setManualAudit([]); });
+    return () => { active = false; };
+  }, [order.id, auditVersion]);
+
   return (
     <main className="page-shell">
       <BackButton onClick={back} />
       <section className={`detail-hero ${order.status}`}>
         <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p></div></div>
-        <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
+        <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{money(order.total)}</strong><small>Zaplaceno {order.paidAt}</small></div>
         <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemId(""); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
       </section>
       <section className="items-section">
-        <div className="section-heading"><div><span className="eyebrow">Obsah objednávky</span><h2>Jednotlivé země</h2></div><span className="count">{order.items.length}</span></div>
+        <div className="section-heading"><div><span className="eyebrow">Obsah objednávky</span><h2>Známky, mosty a placené úseky</h2></div><span className="count">{order.items.length}</span></div>
         {order.items.map(item => {
           const timeline = buildItemTimeline(order.id, item, orderLogs);
-          return <article className={`item-card ${item.status}`} key={item.id ?? item.country}>
-            <button className="item-summary" onClick={() => setExpanded(expanded === item.country ? "" : item.country)}>
-              <span className="country-flag"><Flag code={item.country} /></span><div><strong>{item.country} · {item.product}</strong><span>{item.validFrom} – {item.validTo}</span></div>
-              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.duration ?? "Čeká"}</span></div><span className={`status-tag ${item.status}`}>{statusLabels[item.status]}</span>{expanded === item.country ? <ChevronDown /> : <ChevronRight />}
+          const itemKey = item.id ?? `${item.source}-${item.country}-${item.product}`;
+          const dateLabel = item.itemKind && item.itemKind !== "vignette" ? `Průjezd ${item.validFrom}` : `${item.validFrom} – ${item.validTo}`;
+          return <article className={`item-card ${item.status}`} key={itemKey}>
+            <button className="item-summary" onClick={() => setExpanded(expanded === itemKey ? "" : itemKey)}>
+              <span className="country-flag"><Flag code={item.country} /></span><div><strong>{item.product} · {item.displayCode ?? item.country}</strong><span>{dateLabel}</span></div>
+              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.duration ?? "Čeká"}</span></div><span className={`status-tag ${item.status}`}>{statusLabels[item.status]}</span>{expanded === itemKey ? <ChevronDown /> : <ChevronRight />}
             </button>
-            {expanded === item.country && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{item.status === "failed" && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený.</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
+            {expanded === itemKey && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{item.status === "failed" && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený.</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
           </article>;
         })}
       </section>
-      {fulfillOpen && <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => fulfillState !== "saving" && setFulfillOpen(false)}><section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="manual-fulfill-title" onMouseDown={event => event.stopPropagation()}><button className="manual-fulfill-close" onClick={() => setFulfillOpen(false)} aria-label="Zavřít"><X size={18} /></button><span className="manual-fulfill-icon"><CheckCircle2 size={22} /></span><h2 id="manual-fulfill-title">Označit jako FULFILLED</h2><p>Vyber stát, který jsi ručně dokončil. Tato změna se zapíše přímo do Supabase.</p><div className="manual-country-list">{order.items.map(item => <button key={item.id ?? item.country} className={fulfillItemId === item.id ? "selected" : ""} disabled={!item.id || !item.source || fulfillState === "saving"} onClick={() => { setFulfillItemId(item.id ?? ""); setFulfillState("idle"); }}><Flag code={item.country} /><span><strong>{item.country}</strong><small>{item.product}</small></span><i /></button>)}</div>{fulfillState === "error" && <div className="manual-fulfill-error">Zápis se nepodařil. Zkus to prosím znovu.</div>}<div className="manual-fulfill-actions"><button onClick={() => setFulfillOpen(false)} disabled={fulfillState === "saving"}>Zrušit</button><button className="confirm" onClick={() => void confirmFulfilled()} disabled={!fulfillItemId || fulfillState === "saving"}>{fulfillState === "saving" ? "Ukládám…" : "Potvrdit FULFILLED"}</button></div></section></div>}
+      <section className="manual-audit-section">
+        <div className="section-heading"><div><span className="eyebrow">Doklady a ruční zásahy</span><h2>Historie ručního FULFILLED</h2></div><span className="count">{manualAudit.length}</span></div>
+        <div className="manual-audit-list surface">
+          {manualAudit.length ? manualAudit.map(entry => <article key={entry.id}>
+            <span className="manual-audit-icon"><CheckCircle2 size={17} /></span>
+            <div><strong>{entry.country_code ? `${entry.country_code} · ` : ""}Označeno ručně jako FULFILLED</strong><small>Předchozí stav: {entry.previous_status || "neuveden"}</small></div>
+            <div className="manual-audit-who"><strong>{entry.actor_email}</strong><time>{statusDate(entry.fulfilled_at)}</time></div>
+          </article>) : <div className="manual-audit-empty">U této objednávky zatím nebyl proveden žádný ruční FULFILLED.</div>}
+        </div>
+      </section>
+      {fulfillOpen && <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => fulfillState !== "saving" && setFulfillOpen(false)}><section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="manual-fulfill-title" onMouseDown={event => event.stopPropagation()}><button className="manual-fulfill-close" onClick={() => setFulfillOpen(false)} aria-label="Zavřít"><X size={18} /></button><span className="manual-fulfill-icon"><CheckCircle2 size={22} /></span><h2 id="manual-fulfill-title">Označit jako FULFILLED</h2><p>Vyber konkrétní položku, kterou jsi ručně dokončil. Změna se zapíše přímo do Supabase.</p><div className="manual-country-list">{order.items.map(item => <button key={item.id ?? `${item.source}-${item.country}-${item.product}`} className={fulfillItemId === item.id ? "selected" : ""} disabled={!item.id || !item.source || fulfillState === "saving"} onClick={() => { setFulfillItemId(item.id ?? ""); setFulfillState("idle"); }}><Flag code={item.country} /><span><strong>{item.product}</strong><small>{item.displayCode ?? item.country}</small></span><i /></button>)}</div>{fulfillState === "error" && <div className="manual-fulfill-error">Zápis se nepodařil. Zkus to prosím znovu.</div>}<div className="manual-fulfill-actions"><button onClick={() => setFulfillOpen(false)} disabled={fulfillState === "saving"}>Zrušit</button><button className="confirm" onClick={() => void confirmFulfilled()} disabled={!fulfillItemId || fulfillState === "saving"}>{fulfillState === "saving" ? "Ukládám…" : "Potvrdit FULFILLED"}</button></div></section></div>}
     </main>
   );
 }
@@ -1092,6 +1138,19 @@ function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: (
 
 type TreeKind = "screenshots" | "documents";
 type ScreenshotFile = { index: number; name: string; file: string; url: string };
+type DashboardDocument = {
+  id: string;
+  orderId: string;
+  group: "egp_invoice" | "official_receipt";
+  label: string;
+  filename: string;
+  contentType: string;
+  url: string;
+  countryCode?: string;
+  receivedAt?: string;
+  orderDate?: string;
+  plate?: string;
+};
 type ScreenshotRun = {
   id: string;
   source: string;
@@ -1212,30 +1271,32 @@ function ScreenshotTree({ baseOrder, back }: { baseOrder: Order; back: () => voi
   </div></section>{preview && selected && <div className="preview-modal" onClick={() => setPreview(null)}><div className="screenshot-preview" onClick={event => event.stopPropagation()}><button className="close" onClick={() => setPreview(null)}><X /></button><img className="large-screenshot" src={preview.url} alt={screenshotStepLabels[preview.name] ?? preview.name} /><div className="preview-footer"><div><strong>{screenshotStepLabels[preview.name] ?? preview.name}</strong><span>{selected.country} · {selected.plate || shortId(selected.orderId)}</span></div><a className="download" href={preview.url} download={preview.file}><Download size={16} /> Stáhnout</a></div></div></div>}</main>;
 }
 
-function DocumentsTree({ baseOrder, back }: { baseOrder: Order; back: () => void }) {
+function DocumentsArchive({ back }: { back: () => void }) {
+  const [documents, setDocuments] = useState<DashboardDocument[]>([]);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [datesOpen, setDatesOpen] = useState<Set<string>>(() => new Set());
+  const [ordersOpen, setOrdersOpen] = useState<Set<string>>(() => new Set());
   const [selected, setSelected] = useState("");
-  const [dateOpen, setDateOpen] = useState(false);
-  const [orderOpen, setOrderOpen] = useState(false);
   const explorer = useExplorerWidth();
-  const files = ["Faktura.pdf", "Původní e-mail.eml"];
-  const countries = [...new Set(baseOrder.items.map(item => item.country))];
-  const date = baseOrder.createdAt.split(",")[0] || "Datum není dostupné";
-  return <main className="page-shell"><BackButton onClick={back} /><section className="file-browser surface" style={{ "--tree-width": `${explorer.width}px` } as CSSProperties}><nav className="tree"><div className="tree-date"><button className={dateOpen ? "open" : ""} onClick={() => setDateOpen(!dateOpen)}><span className="tree-chevron">{dateOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>{dateOpen ? <FolderOpen size={18} /> : <Folder size={18} />}{date}</button>
-    {dateOpen && <div className="tree-order"><button className={`level-1 ${orderOpen ? "open" : ""}`} onClick={() => setOrderOpen(!orderOpen)} title={`${baseOrder.id} · ${baseOrder.plate}`}><span className="tree-chevron">{orderOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>{orderOpen ? <FolderOpen size={18} /> : <Folder size={18} />}<span className="tree-order-label"><code>{baseOrder.id}</code><small>{baseOrder.plate}</small></span></button>
-      {orderOpen && countries.map(country => <button key={country} className={`level-2 ${selected === country ? "selected" : ""}`} onClick={() => setSelected(country)}><span className="tree-chevron spacer" />{selected === country ? <FolderOpen size={18} /> : <Folder size={18} />}<Flag code={country} /><span>{country}</span></button>)}
-    </div>}
-  </div></nav><div className="explorer-resizer" onPointerDown={event => { event.preventDefault(); explorer.startResize(event.clientX); }} role="separator" aria-orientation="vertical" aria-label="Změnit šířku stromu" /><div className="file-content">{selected ? <><div className="file-path">{date} <ChevronRight size={14} /> <code>{baseOrder.id}</code> <ChevronRight size={14} /> <b>{selected}</b></div><div className="files">{files.map(file => <button key={file}><span className="file-thumb">{file.endsWith("pdf") ? <FileText /> : <FileArchive />}</span><strong>{file}</strong><Download size={16} /></button>)}</div></> : <div className="empty-files">Vyber složku s doklady.</div>}</div></section></main>;
+  useEffect(() => { let active = true; void fetch("/api/documents", { headers: { Accept: "application/json" } }).then(response => { if (!response.ok) throw new Error(); return response.json() as Promise<{ documents?: DashboardDocument[] }>; }).then(payload => { if (active) { setDocuments(payload.documents ?? []); setState("ready"); } }).catch(() => { if (active) setState("error"); }); return () => { active = false; }; }, []);
+  const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, key: string) => setter(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const dates = [...new Set(documents.map(file => file.orderDate).filter((date): date is string => Boolean(date)))].sort().reverse();
+  const separator = selected.indexOf("|");
+  const selectedOrder = separator < 0 ? "" : selected.slice(0, separator);
+  const selectedGroup = separator < 0 ? "" : selected.slice(separator + 1);
+  const visible = documents.filter(file => file.orderId === selectedOrder && file.group === selectedGroup);
+  return <main className="page-shell"><BackButton onClick={back} /><section className="file-browser surface" style={{ "--tree-width": `${explorer.width}px` } as CSSProperties}><nav className="tree">{dates.map(date => <div className="tree-date" key={date}><button onClick={() => toggle(setDatesOpen, date)}><span className="tree-chevron">{datesOpen.has(date) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>{datesOpen.has(date) ? <FolderOpen size={18} /> : <Folder size={18} />}{storageDate(date)}</button>{datesOpen.has(date) && [...new Set(documents.filter(file => file.orderDate === date).map(file => file.orderId))].map(orderId => { const files = documents.filter(file => file.orderId === orderId); const key = `${date}|${orderId}`; return <div className="tree-order" key={orderId}><button className="level-1" onClick={() => toggle(setOrdersOpen, key)}><span className="tree-chevron">{ordersOpen.has(key) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>{ordersOpen.has(key) ? <FolderOpen size={18} /> : <Folder size={18} />}<span className="tree-order-label"><code>{orderId}</code>{files[0]?.plate && <small>{files[0].plate}</small>}</span></button>{ordersOpen.has(key) && (["official_receipt", "egp_invoice"] as const).filter(group => files.some(file => file.group === group)).map(group => <button className={`level-2 ${selected === `${orderId}|${group}` ? "selected" : ""}`} key={group} onClick={() => setSelected(`${orderId}|${group}`)}><span className="tree-chevron spacer" /><FileText size={18} /><span>{group === "official_receipt" ? "Doklady z portálů" : "Faktury EuroGoPass"}</span></button>)}</div>; })}</div>)}{state === "loading" && <div className="tree-state">Načítám doklady…</div>}{state === "ready" && !documents.length && <div className="tree-state">Nejsou uložené žádné doklady.</div>}{state === "error" && <div className="tree-state error">Doklady se nepodařilo načíst.</div>}</nav><div className="explorer-resizer" onPointerDown={event => { event.preventDefault(); explorer.startResize(event.clientX); }} role="separator" /><div className="file-content">{visible.length ? <div className="files">{visible.map(file => <a href={file.url} download={file.filename} key={file.id}><span className="file-thumb"><FileText /></span><strong>{file.label}{file.countryCode ? ` · ${file.countryCode}` : ""}</strong><small>{file.filename}</small><Download size={16} /></a>)}</div> : <div className="empty-files">{state === "loading" ? "Načítám…" : "Vyber složku s doklady."}</div>}</div></section></main>;
 }
 
 function FileTree({ kind, baseOrder, back }: { kind: TreeKind; baseOrder: Order; back: () => void }) {
   return kind === "screenshots"
     ? <ScreenshotTree baseOrder={baseOrder} back={back} />
-    : <DocumentsTree baseOrder={baseOrder} back={back} />;
+    : <DocumentsArchive back={back} />;
 }
 
 function FullLogs({ back }: { back: () => void }) { return <main className="page-shell log-page"><LiveLog expand={back} expanded /></main>; }
 
-export default function App() {
+function DashboardApp({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>("dashboard");
   const [orderData, setOrderData] = useState<Order[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order>(demoOrders[0]);
@@ -1264,5 +1325,42 @@ export default function App() {
     setSelectedOrder(current => update(current));
     setOrderData(current => current.map(order => order.id === selectedOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={() => navigate("dashboard")} openOrder={openOrder} />}{view === "order" && <OrderDetail order={selectedOrder} back={() => navigate("dashboard")} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={() => navigate("dashboard")} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={selectedOrder} back={() => navigate("dashboard")} />}{view === "documents" && <FileTree kind="documents" baseOrder={selectedOrder} back={() => navigate("dashboard")} />}{view === "posthog" && <PostHogDetail back={() => navigate("dashboard")} />}</>;
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={() => navigate("dashboard")} openOrder={openOrder} />}{view === "order" && <OrderDetail order={selectedOrder} back={() => navigate("dashboard")} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={() => navigate("dashboard")} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={selectedOrder} back={() => navigate("dashboard")} />}{view === "documents" && <FileTree kind="documents" baseOrder={selectedOrder} back={() => navigate("dashboard")} />}{view === "posthog" && <PostHogDetail back={() => navigate("dashboard")} />}</>;
+}
+
+export default function App() {
+  const [auth, setAuth] = useState<"loading" | "authenticated" | "anonymous">("loading");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginState, setLoginState] = useState<"idle" | "loading" | "error">("idle");
+
+  useEffect(() => {
+    void fetch("/api/auth/session", { headers: { Accept: "application/json" } })
+      .then(response => setAuth(response.ok ? "authenticated" : "anonymous"))
+      .catch(() => setAuth("anonymous"));
+  }, []);
+
+  const login = async (event: FormEvent) => {
+    event.preventDefault();
+    setLoginState("loading");
+    try {
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ email, password }) });
+      if (!response.ok) throw new Error();
+      setPassword("");
+      setLoginState("idle");
+      setAuth("authenticated");
+    } catch {
+      setLoginState("error");
+    }
+  };
+
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    setPassword("");
+    setAuth("anonymous");
+  };
+
+  if (auth === "loading") return <main className="auth-screen"><Logo /><span className="auth-loading">Ověřuji přihlášení…</span></main>;
+  if (auth === "anonymous") return <main className="auth-screen"><section className="auth-card surface"><Logo /><form onSubmit={event => void login(event)}><label><span>E-mail</span><input type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required autoFocus /></label><label><span>Heslo</span><input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>{loginState === "error" && <div className="auth-error">Nesprávný e-mail nebo heslo.</div>}<button type="submit" disabled={loginState === "loading"}>{loginState === "loading" ? "Přihlašuji…" : "Přihlásit se"}</button></form></section></main>;
+  return <DashboardApp onLogout={() => void logout()} />;
 }
