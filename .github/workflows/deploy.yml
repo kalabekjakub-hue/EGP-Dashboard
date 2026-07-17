@@ -1,0 +1,58 @@
+name: Deploy dashboard
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production-dashboard
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > ~/.ssh/egp_dashboard
+          chmod 600 ~/.ssh/egp_dashboard
+          ssh-keyscan -H 195.133.93.51 >> ~/.ssh/known_hosts
+
+      - name: Upload application
+        run: |
+          rsync -az --delete \
+            --exclude='.git/' \
+            --exclude='secrets/' \
+            --exclude='runtime/' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            -e 'ssh -i ~/.ssh/egp_dashboard' \
+            ./ egpadmin@195.133.93.51:/opt/egp-admin/app/
+
+      - name: Rebuild and verify production
+        run: |
+          ssh -i ~/.ssh/egp_dashboard egpadmin@195.133.93.51 <<'REMOTE'
+            set -euo pipefail
+            cd /opt/egp-admin/app
+            docker compose -f docker-compose.production.yml up -d --build --remove-orphans
+            for attempt in $(seq 1 20); do
+              if curl -fsS http://127.0.0.1:3100/ >/dev/null; then
+                docker compose -f docker-compose.production.yml ps
+                exit 0
+              fi
+              sleep 3
+            done
+            docker compose -f docker-compose.production.yml logs --tail=100 dashboard
+            exit 1
+          REMOTE
