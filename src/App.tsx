@@ -841,7 +841,7 @@ function PostHogDetail({ back }: { back: () => void }) {
     </section>}
     {tab === "orders" && <section className="analytics-tab-content">
       <div className="analytics-stat-grid">
-        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="order_paid · přepočteno kurzem ECB" previous={{ current: summary.revenue, value: data.previous.revenue }} />
+        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Supabase paid_at · přepočteno kurzem ECB" previous={{ current: summary.revenue, value: data.previous.revenue }} />
         <AnalyticsStat label="Průměrná objednávka" value={summary.averageOrder.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="průměrná zaplacená částka" />
         <AnalyticsStat label="Flex" value={`${summary.flexOrders}×`} note={`${summary.paidOrders ? Math.round(summary.flexOrders / summary.paidOrders * 100) : 0} % objednávek`} />
         <AnalyticsStat label="Dálniční známky" value={integerFormat.format(summary.vignettes)} note="zaplacených položek" />

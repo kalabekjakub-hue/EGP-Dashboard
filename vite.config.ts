@@ -957,6 +957,51 @@ function convertCurrencyRowsToEur(rows: unknown[][], rates: Map<string, Map<stri
   }, 0);
 }
 
+type PaidOrderAnalyticsRow = {
+  id: string;
+  paid_at: string;
+  amount_total_minor: number;
+  currency: string;
+  flex_enabled?: boolean;
+};
+
+async function loadPaidOrderAnalytics(since: Date) {
+  const { url, key } = loadWorkerEnv();
+  if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
+  const headers = { apikey: key, Authorization: `Bearer ${key}` };
+  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled&paid_at=gte.${encodeURIComponent(since.toISOString())}&order=paid_at.asc&limit=5000`, { headers });
+  if (!response.ok) throw new Error(`Paid orders API ${response.status}`);
+  const orders = await response.json() as PaidOrderAnalyticsRow[];
+  if (!orders.length) return { orders, vignettes: [] as Array<{ order_id: string }>, tolls: [] as Array<{ order_id: string }> };
+  const ids = encodeURIComponent(`(${orders.map(order => order.id).join(",")})`);
+  const [vignettesResponse, tollsResponse] = await Promise.all([
+    fetch(`${url}/rest/v1/order_items?select=order_id&order_id=in.${ids}`, { headers }),
+    fetch(`${url}/rest/v1/order_bridge_toll_items?select=order_id&order_id=in.${ids}`, { headers }),
+  ]);
+  if (!vignettesResponse.ok || !tollsResponse.ok) throw new Error("Paid order items API failed");
+  return {
+    orders,
+    vignettes: await vignettesResponse.json() as Array<{ order_id: string }>,
+    tolls: await tollsResponse.json() as Array<{ order_id: string }>,
+  };
+}
+
+function pragueDate(value: string) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Prague", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(value));
+}
+
+function paidOrderCurrencyRows(orders: PaidOrderAnalyticsRow[]): unknown[][] {
+  const grouped = new Map<string, number>();
+  for (const order of orders) {
+    const key = `${pragueDate(order.paid_at)}|${order.currency.toUpperCase()}`;
+    grouped.set(key, (grouped.get(key) ?? 0) + order.amount_total_minor / 100);
+  }
+  return [...grouped].map(([key, amount]) => {
+    const [day, currency] = key.split("|");
+    return [day, currency, amount];
+  });
+}
+
 function postHogReadApi(env: Record<string, string>) {
   const host = (env.POSTHOG_HOST || "https://eu.posthog.com").replace(/\/$/, "");
   const projectId = env.POSTHOG_PROJECT_ID;
@@ -991,12 +1036,13 @@ function postHogReadApi(env: Record<string, string>) {
           return;
         }
         try {
-          const [summaryRows, orderRows, previousRows, previousOrderRows, dailyRows, sourceRows, deviceRows, pageRows, browserRows, countryRows, languageRows, stepRows, validationRows, ecbRates] = await Promise.all([
-            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, countIf(event = '$pageview') AS pageviews, uniqExactIf(properties.$session_id, event = '$pageview') AS sessions, countIf(event = 'checkout_entered') AS checkouts, countIf(event = 'checkout_payment_started') AS payment_started, countIf(event = 'order_paid') AS paid, count() AS events, countIf(event = 'route_search_started') AS route_searches, countIf(event = 'route_calculated') AS routes_calculated, countIf(event = 'checkout_left') AS checkout_left, countIf(event = 'checkout_returned') AS checkout_returned, countIf(event = 'checkout_validation_failed') AS validation_failures, countIf(event = 'checkout_payment_failed') AS payment_failures, countIf(event = '$rageclick') AS rage_clicks, countIf(event = 'checkout_warning_shown') AS warnings FROM events WHERE timestamp >= now() - INTERVAL 30 DAY"),
-            runQuery("SELECT toDate(timestamp) AS day, properties.currency AS currency, sum(toFloat(properties.amount_minor)) / 100 AS amount, count() AS orders, countIf(properties.has_flex = true) AS flex_orders, sum(toInt(properties.vignette_count)) AS vignettes, sum(toInt(properties.bridge_toll_count)) AS tolls FROM events WHERE event = 'order_paid' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY day, currency ORDER BY day"),
-            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, countIf(event = 'checkout_entered') AS checkouts, countIf(event = 'order_paid') AS paid FROM events WHERE timestamp >= now() - INTERVAL 60 DAY AND timestamp < now() - INTERVAL 30 DAY"),
-            runQuery("SELECT toDate(timestamp) AS day, properties.currency AS currency, sum(toFloat(properties.amount_minor)) / 100 AS amount FROM events WHERE event = 'order_paid' AND timestamp >= now() - INTERVAL 60 DAY AND timestamp < now() - INTERVAL 30 DAY GROUP BY day, currency ORDER BY day"),
-            runQuery("SELECT toDate(timestamp) AS day, uniqExactIf(distinct_id, event = '$pageview') AS visitors, countIf(event = 'checkout_entered') AS checkouts, countIf(event = 'order_paid') AS paid FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY day ORDER BY day"),
+          const now = new Date();
+          const currentSince = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
+          const previousSince = new Date(now.getTime() - 60 * 24 * 60 * 60_000);
+          const [summaryRows, previousRows, dailyRows, sourceRows, deviceRows, pageRows, browserRows, countryRows, languageRows, stepRows, validationRows, ecbRates, paidData] = await Promise.all([
+            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, countIf(event = '$pageview') AS pageviews, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = '$pageview') AS sessions, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_payment_started') AS payment_started, count() AS events, countIf(event = 'route_search_started') AS route_searches, countIf(event = 'route_calculated') AS routes_calculated, countIf(event = 'checkout_left') AS checkout_left, countIf(event = 'checkout_returned') AS checkout_returned, countIf(event = 'checkout_validation_failed') AS validation_failures, countIf(event = 'checkout_payment_failed') AS payment_failures, countIf(event = '$rageclick') AS rage_clicks, countIf(event = 'checkout_warning_shown') AS warnings FROM events WHERE timestamp >= now() - INTERVAL 30 DAY"),
+            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 60 DAY AND timestamp < now() - INTERVAL 30 DAY"),
+            runQuery("SELECT formatDateTime(timestamp, '%Y-%m-%d', 'Europe/Prague') AS day, uniqExactIf(distinct_id, event = '$pageview') AS visitors, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY day ORDER BY day"),
             runQuery("SELECT properties.$referring_domain AS source, uniqExact(distinct_id) AS visitors FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY source ORDER BY visitors DESC LIMIT 6"),
             runQuery("SELECT properties.$device_type AS device, uniqExact(distinct_id) AS visitors FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY device ORDER BY visitors DESC LIMIT 6"),
             runQuery("SELECT properties.$pathname AS path, count() AS views FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY path ORDER BY views DESC LIMIT 6"),
@@ -1006,16 +1052,24 @@ function postHogReadApi(env: Record<string, string>) {
             runQuery("SELECT properties.step AS step, count() AS views FROM events WHERE event = 'checkout_step_viewed' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY step ORDER BY views DESC"),
             runQuery("SELECT properties.step AS step, properties.reason AS reason, count() AS failures FROM events WHERE event = 'checkout_validation_failed' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY step, reason ORDER BY failures DESC LIMIT 10"),
             loadEcbRates(),
+            loadPaidOrderAnalytics(previousSince),
           ]);
           const row = summaryRows[0] ?? [];
           const previous = previousRows[0] ?? [];
           const checkouts = Number(row[3] ?? 0);
-          const paidOrders = Number(row[5] ?? 0);
-          const revenue = convertCurrencyRowsToEur(orderRows, ecbRates);
-          const previousRevenue = convertCurrencyRowsToEur(previousOrderRows, ecbRates);
-          const flexOrders = orderRows.reduce((sum, order) => sum + Number(order[4] ?? 0), 0);
-          const vignettes = orderRows.reduce((sum, order) => sum + Number(order[5] ?? 0), 0);
-          const bridgeTolls = orderRows.reduce((sum, order) => sum + Number(order[6] ?? 0), 0);
+          const currentOrders = paidData.orders.filter(order => new Date(order.paid_at) >= currentSince);
+          const previousOrders = paidData.orders.filter(order => new Date(order.paid_at) < currentSince);
+          const currentIds = new Set(currentOrders.map(order => order.id));
+          const paidOrders = currentOrders.length;
+          const revenue = convertCurrencyRowsToEur(paidOrderCurrencyRows(currentOrders), ecbRates);
+          const previousRevenue = convertCurrencyRowsToEur(paidOrderCurrencyRows(previousOrders), ecbRates);
+          const flexOrders = currentOrders.filter(order => order.flex_enabled === true).length;
+          const vignettes = paidData.vignettes.filter(item => currentIds.has(item.order_id)).length;
+          const bridgeTolls = paidData.tolls.filter(item => currentIds.has(item.order_id)).length;
+          const paidByDay = new Map<string, number>();
+          for (const order of currentOrders) paidByDay.set(pragueDate(order.paid_at), (paidByDay.get(pragueDate(order.paid_at)) ?? 0) + 1);
+          const trafficByDay = new Map(dailyRows.map(([date, visitors, dailyCheckouts]) => [String(date), { visitors: Number(visitors ?? 0), checkouts: Number(dailyCheckouts ?? 0) }]));
+          const dailyDates = [...new Set([...trafficByDay.keys(), ...paidByDay.keys()])].sort();
           const data: PostHogAnalytics = {
             periodDays: 30,
             generatedAt: new Date().toISOString(),
@@ -1026,33 +1080,33 @@ function postHogReadApi(env: Record<string, string>) {
               checkouts,
               paymentStarted: Number(row[4] ?? 0),
               paidOrders,
-              totalEvents: Number(row[6] ?? 0),
+              totalEvents: Number(row[5] ?? 0),
               conversion: checkouts ? Math.round((paidOrders / checkouts) * 1000) / 10 : 0,
               revenue: Math.round(revenue * 100) / 100,
               averageOrder: paidOrders ? Math.round(revenue / paidOrders * 100) / 100 : 0,
               flexOrders,
               vignettes,
               bridgeTolls,
-              routeSearches: Number(row[7] ?? 0),
-              routesCalculated: Number(row[8] ?? 0),
-              checkoutLeft: Number(row[9] ?? 0),
-              checkoutReturned: Number(row[10] ?? 0),
-              validationFailures: Number(row[11] ?? 0),
-              paymentFailures: Number(row[12] ?? 0),
-              rageClicks: Number(row[13] ?? 0),
-              warnings: Number(row[14] ?? 0),
+              routeSearches: Number(row[6] ?? 0),
+              routesCalculated: Number(row[7] ?? 0),
+              checkoutLeft: Number(row[8] ?? 0),
+              checkoutReturned: Number(row[9] ?? 0),
+              validationFailures: Number(row[10] ?? 0),
+              paymentFailures: Number(row[11] ?? 0),
+              rageClicks: Number(row[12] ?? 0),
+              warnings: Number(row[13] ?? 0),
             },
             previous: {
               visitors: Number(previous[0] ?? 0),
               checkouts: Number(previous[1] ?? 0),
-              paidOrders: Number(previous[2] ?? 0),
+              paidOrders: previousOrders.length,
               revenue: Math.round(previousRevenue * 100) / 100,
             },
-            daily: dailyRows.map(([date, visitors, dailyCheckouts, dailyPaid]) => ({
-              date: String(date),
-              visitors: Number(visitors ?? 0),
-              checkouts: Number(dailyCheckouts ?? 0),
-              paidOrders: Number(dailyPaid ?? 0),
+            daily: dailyDates.map(date => ({
+              date,
+              visitors: trafficByDay.get(date)?.visitors ?? 0,
+              checkouts: trafficByDay.get(date)?.checkouts ?? 0,
+              paidOrders: paidByDay.get(date) ?? 0,
             })),
             sources: sourceRows.map(([name, visitors]) => ({
               name: String(name || "$direct"),
