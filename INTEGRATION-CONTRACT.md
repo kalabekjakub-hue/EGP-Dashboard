@@ -1,5 +1,7 @@
 # EGP dashboard – integrační kontrakt
 
+> **ZÁVAZNÉ PRAVIDLO:** Produkční data jsou READ-ONLY. Jediné povolené zápisy jsou (1) ruční změna existující položky objednávky na `FULFILLED` včetně auditu a (2) operace Redakce/blogu v redakčních tabulkách a úložištích. Veškerá deduplikace nebo skrývání objednávek musí probíhat pouze při čtení nebo v UI. Objednávky ani jejich položky se kvůli dashboardu nesmí vytvářet, upravovat ani mazat.
+
 ## Bezpečnostní hranice
 
 Dashboard je read-only administrativní pohled. Jeho backend smí měnit produkční data pouze jedinou operací:

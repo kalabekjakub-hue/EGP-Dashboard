@@ -25,9 +25,9 @@ import {
   X,
 } from "lucide-react";
 import { orders as demoOrders, portalLinks, type Order, type OrderItem, type OrderStatus } from "./data";
-import { EditorialArticleEditor, EditorialHome, EditorialPreview } from "./editorial";
+import { EditorialArticleEditor, EditorialHome, EditorialPreview, EditorialSettingsModal } from "./editorial";
 
-type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article" | "settings";
+type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article";
 
 function routeFromPath(pathname = window.location.pathname): { view: View; orderId?: string; articleId?: string } {
   const path = pathname.replace(/\/+$/, "") || "/";
@@ -537,6 +537,7 @@ function statusDate(value: string | null) {
 function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () => void; navigate: (view: View) => void; onClearAttention: () => void; onLogout: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editorialSettingsModalOpen, setEditorialSettingsModalOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [worker, setWorker] = useState<"egp" | "wise" | null>(null);
   const [workersStatus, setWorkersStatus] = useState<WorkersStatus | null>(null);
@@ -612,7 +613,7 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
   const egpTone = workersStatus?.egp.ok ? "ok" : workersStatus ? "down" : "warn";
   const wiseTone = !workersStatus ? "warn" : !workersStatus.wise.ok ? "down" : workersStatus.wise.authenticated && workersStatus.wise.cdpConnected && !workersStatus.wise.lastError ? "ok" : "warn";
 
-  return (
+  return <>
     <header className="topbar">
       <button className="logo-button" onClick={goHome}><Logo /></button>
       <div className="topbar-right">
@@ -626,7 +627,7 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
           {menuOpen && (
             <div className="settings-menu">
               <button onClick={() => { setSettingsOpen(!settingsOpen); setLinksOpen(false); }}><Settings size={16} /> Nastavení <ChevronLeft size={16} /></button>
-              {settingsOpen && <div className="settings-submenu"><button onClick={() => { onClearAttention(); setMenuOpen(false); setSettingsOpen(false); setLinksOpen(false); }}><Trash2 size={16} /> Vymazat centrum pozornosti</button></div>}
+              {settingsOpen && <div className="settings-submenu"><button onClick={() => { setEditorialSettingsModalOpen(true); setMenuOpen(false); setSettingsOpen(false); setLinksOpen(false); }}><FileText size={16} /> Redakce</button><button onClick={() => { onClearAttention(); setMenuOpen(false); setSettingsOpen(false); setLinksOpen(false); }}><Trash2 size={16} /> Vymazat centrum pozornosti</button></div>}
               <button onClick={() => { setLinksOpen(!linksOpen); setSettingsOpen(false); }}>Odkazy <ChevronLeft size={16} /></button>
               {linksOpen && <div className="links-submenu">
                 {externalLinks.map(([label, url]) => <a key={label} href={url} target="_blank" rel="noreferrer">{label}<ExternalLink size={13} /></a>)}
@@ -647,7 +648,8 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
         </div>
       )}
     </header>
-  );
+    {editorialSettingsModalOpen && <EditorialSettingsModal onClose={() => setEditorialSettingsModalOpen(false)} />}
+  </>;
 }
 
 function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
@@ -701,7 +703,6 @@ function PostHogPreview({ onOpen }: { onOpen: () => void }) {
         <span><small>Nákupy / návštěvníci</small><strong>{summary.conversion.toLocaleString("cs-CZ")} %</strong></span>
         <span><small>Tržby</small><strong>{summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong></span>
       </div> : <div className={`posthog-state ${state}`}>{state === "loading" ? "Načítám data…" : "Data nejsou dostupná"}</div>}
-      <ChevronRight className="posthog-open-icon" size={20} />
     </button>
   );
 }
@@ -1171,8 +1172,8 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
       <div className="workspace">
         <div className="dashboard-overview">
           <DailySummaryCard overview={overview} onOpenAttention={() => setAttentionOpen(true)} />
-          <PostHogPreview onOpen={() => navigate("posthog")} />
           <EditorialPreview onOpen={() => navigate("editorial")} />
+          <PostHogPreview onOpen={() => navigate("posthog")} />
         </div>
         <LiveLog expand={() => navigate("logs")} />
       </div>
