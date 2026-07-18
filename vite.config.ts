@@ -884,6 +884,7 @@ type PostHogQueryResponse = {
 type PostHogAnalytics = {
   periodDays: number;
   trackingDays: number;
+  comparisonAvailable: boolean;
   generatedAt: string;
   summary: {
     visitors: number;
@@ -912,17 +913,35 @@ type PostHogAnalytics = {
     paymentFailures: number;
     rageClicks: number;
     warnings: number;
+    checkoutEvents: number;
+    paymentStartedEvents: number;
+    checkoutVisitors: number;
+    paidViewedSessions: number;
   };
   previous: { visitors: number; checkouts: number; paidOrders: number; revenue: number };
   daily: Array<{ date: string; visitors: number; checkouts: number; paidOrders: number }>;
-  sources: Array<{ name: string; visitors: number }>;
+  sources: Array<{ name: string; sessions: number; visitors: number; checkouts: number; payments: number }>;
+  landingPages: Array<{ path: string; sessions: number; visitors: number; checkouts: number }>;
+  hourly: Array<{ hour: number; sessions: number; checkouts: number }>;
+  events: Array<{ name: string; events: number; sessions: number; visitors: number }>;
   devices: Array<{ name: string; visitors: number }>;
   pages: Array<{ path: string; views: number }>;
   browsers: Array<{ name: string; visitors: number }>;
   countries: Array<{ name: string; visitors: number }>;
   languages: Array<{ name: string; visitors: number }>;
-  checkoutSteps: Array<{ name: string; views: number }>;
+  checkoutSteps: Array<{ name: string; events: number; sessions: number; visitors: number }>;
   validationIssues: Array<{ step: string; reason: string; count: number }>;
+  dataQuality: {
+    trackedIdentities: number;
+    checkoutIdentities: number;
+    checkoutIdentitiesWithPageview: number;
+    checkoutSessionsWithDuplicates: number;
+    maxCheckoutEventsPerSession: number;
+    pageviewSessions: number;
+    sessionsWithAnyEvent: number;
+    pageviewsWithUtmSource: number;
+    fbclidVisitors: number;
+  };
   financeByCurrency: Array<{ currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>;
 };
 
@@ -1015,6 +1034,8 @@ function postHogReadApi(env: Record<string, string>) {
   const host = (env.POSTHOG_HOST || "https://eu.posthog.com").replace(/\/$/, "");
   const projectId = env.POSTHOG_PROJECT_ID;
   const personalApiKey = env.POSTHOG_PERSONAL_API_KEY;
+  const productionHost = (env.ANALYTICS_PRODUCTION_HOST || "eurogopass.com").toLowerCase();
+  const productionHostHogQl = productionHost.replaceAll("'", "\\'");
   const analyticsProductionSince = new Date(env.ANALYTICS_PRODUCTION_SINCE || "2026-06-25T00:00:00Z");
   if (!Number.isFinite(analyticsProductionSince.getTime())) throw new Error("Invalid ANALYTICS_PRODUCTION_SINCE");
   const analyticsTrackingSince = new Date(env.ANALYTICS_TRACKING_SINCE || "2026-07-03T11:53:00Z");
@@ -1023,8 +1044,8 @@ function postHogReadApi(env: Record<string, string>) {
 
   const runQuery = async (query: string) => {
     const scopedQuery = query
-      .replaceAll("timestamp >= now() - INTERVAL 30 DAY", `(timestamp >= now() - INTERVAL 30 DAY AND timestamp >= toDateTime('${analyticsSinceHogQl}', 'UTC'))`)
-      .replaceAll("timestamp >= now() - INTERVAL 60 DAY", `(timestamp >= now() - INTERVAL 60 DAY AND timestamp >= toDateTime('${analyticsSinceHogQl}', 'UTC'))`);
+      .replaceAll("FROM events WHERE", `FROM events WHERE lower(properties.$host) = '${productionHostHogQl}' AND`)
+      .replaceAll("timestamp >= now() - INTERVAL 30 DAY", `(timestamp >= now() - INTERVAL 30 DAY AND timestamp >= toDateTime('${analyticsSinceHogQl}', 'UTC'))`);
     if (!projectId || !personalApiKey) throw new Error("PostHog konfigurace není kompletní");
     const response = await fetch(`${host}/api/projects/${encodeURIComponent(projectId)}/query/`, {
       method: "POST",
@@ -1056,18 +1077,29 @@ function postHogReadApi(env: Record<string, string>) {
           const now = new Date();
           const currentSince = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
           const previousSince = new Date(now.getTime() - 60 * 24 * 60 * 60_000);
-          const [summaryRows, previousRows, dailyRows, sourceRows, deviceRows, pageRows, browserRows, countryRows, languageRows, stepRows, validationRows, ecbRates, paidData] = await Promise.all([
-            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, countIf(event = '$pageview') AS pageviews, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = '$pageview') AS sessions, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_payment_started') AS payment_started, count() AS events, countIf(event = 'route_search_started') AS route_searches, countIf(event = 'route_calculated') AS routes_calculated, countIf(event = 'checkout_left') AS checkout_left, countIf(event = 'checkout_returned') AS checkout_returned, countIf(event = 'checkout_validation_failed') AS validation_failures, countIf(event = 'checkout_payment_failed') AS payment_failures, countIf(event = '$rageclick') AS rage_clicks, countIf(event = 'checkout_warning_shown') AS warnings FROM events WHERE timestamp >= now() - INTERVAL 30 DAY"),
-            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 60 DAY AND timestamp < now() - INTERVAL 30 DAY"),
+          const trackingAgeDays = Math.max(0, (now.getTime() - analyticsTrackingSince.getTime()) / 86_400_000);
+          const salesAgeDays = Math.max(0, (now.getTime() - analyticsProductionSince.getTime()) / 86_400_000);
+          const comparisonAvailable = trackingAgeDays >= 60 && salesAgeDays >= 60;
+          const previousPromise = comparisonAvailable
+            ? runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 60 DAY AND timestamp < now() - INTERVAL 30 DAY")
+            : Promise.resolve([] as unknown[][]);
+          const [summaryRows, previousRows, dailyRows, sourceRows, landingRows, hourlyRows, eventRows, deviceRows, pageRows, browserRows, countryRows, languageRows, stepRows, validationRows, qualityRows, duplicateRows, ecbRates, paidData] = await Promise.all([
+            runQuery("SELECT uniqExactIf(distinct_id, event = '$pageview') AS visitors, countIf(event = '$pageview') AS pageviews, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = '$pageview') AS sessions, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_payment_started') AS payment_started, count() AS events, countIf(event = 'route_search_started') AS route_searches, countIf(event = 'route_calculated') AS routes_calculated, countIf(event = 'checkout_left') AS checkout_left, countIf(event = 'checkout_returned') AS checkout_returned, countIf(event = 'checkout_validation_failed') AS validation_failures, countIf(event = 'checkout_payment_failed') AS payment_failures, countIf(event = '$rageclick') AS rage_clicks, countIf(event = 'checkout_warning_shown') AS warnings, countIf(event = 'checkout_entered') AS checkout_events, countIf(event = 'checkout_payment_started') AS payment_events, uniqExactIf(distinct_id, event = 'checkout_entered') AS checkout_visitors, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'order_paid_viewed') AS paid_viewed_sessions FROM events WHERE timestamp >= now() - INTERVAL 30 DAY"),
+            previousPromise,
             runQuery("SELECT formatDateTime(timestamp, '%Y-%m-%d', 'Europe/Prague') AS day, uniqExactIf(distinct_id, event = '$pageview') AS visitors, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY day ORDER BY day"),
-            runQuery("SELECT coalesce(source, '$direct') AS source, count() AS visitors FROM (SELECT distinct_id, argMin(properties.$referring_domain, timestamp) AS source FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY distinct_id) GROUP BY source ORDER BY visitors DESC"),
+            runQuery("SELECT multiIf(notEmpty(toString(utm_source)), lower(toString(utm_source)), has_fbclid > 0, 'facebook.com', lower(coalesce(source, '$direct')) IN ('facebook.com', 'www.facebook.com', 'm.facebook.com', 'lm.facebook.com', 'l.facebook.com'), 'facebook.com', lower(coalesce(source, '$direct')) = 'com.google.android.gm', 'gmail', lower(coalesce(source, '$direct')) IN ('eurogopass.com', 'checkout.stripe.com'), 'internal', lower(coalesce(source, '$direct'))) AS channel, count() AS sessions, uniqExact(distinct_id) AS visitors, countIf(checkouts > 0) AS checkouts, countIf(payments > 0) AS payments FROM (SELECT properties.$session_id AS session_id, argMinIf(distinct_id, timestamp, event = '$pageview') AS distinct_id, argMinIf(properties.$referring_domain, timestamp, event = '$pageview') AS source, argMinIf(properties.$utm_source, timestamp, event = '$pageview' AND notEmpty(toString(properties.$utm_source))) AS utm_source, countIf(event = '$pageview' AND positionCaseInsensitive(coalesce(properties.$current_url, ''), 'fbclid') > 0) AS has_fbclid, countIf(event = '$pageview') AS pageviews, countIf(event = 'checkout_entered') AS checkouts, countIf(event = 'checkout_payment_started') AS payments FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY session_id HAVING pageviews > 0) GROUP BY channel ORDER BY sessions DESC"),
+            runQuery("SELECT landing_path, count() AS sessions, uniqExact(distinct_id) AS visitors, countIf(checkouts > 0) AS checkouts FROM (SELECT properties.$session_id AS session_id, argMinIf(distinct_id, timestamp, event = '$pageview') AS distinct_id, argMinIf(properties.$pathname, timestamp, event = '$pageview') AS landing_path, countIf(event = '$pageview') AS pageviews, countIf(event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY session_id HAVING pageviews > 0) GROUP BY landing_path ORDER BY sessions DESC LIMIT 12"),
+            runQuery("SELECT formatDateTime(timestamp, '%H', 'Europe/Prague') AS hour_label, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = '$pageview') AS sessions, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = 'checkout_entered') AS checkouts FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY hour_label ORDER BY hour_label"),
+            runQuery("SELECT event, count() AS events, uniqExact(coalesce(properties.$session_id, distinct_id)) AS sessions, uniqExact(distinct_id) AS visitors FROM events WHERE timestamp >= now() - INTERVAL 30 DAY GROUP BY event ORDER BY events DESC LIMIT 24"),
             runQuery("SELECT properties.$device_type AS device, uniqExact(distinct_id) AS visitors FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY device ORDER BY visitors DESC LIMIT 6"),
             runQuery("SELECT properties.$pathname AS path, count() AS views FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY path ORDER BY views DESC LIMIT 6"),
             runQuery("SELECT properties.$browser AS browser, uniqExact(distinct_id) AS visitors FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY browser ORDER BY visitors DESC LIMIT 6"),
             runQuery("SELECT properties.$geoip_country_code AS country, uniqExact(distinct_id) AS visitors FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY country ORDER BY visitors DESC LIMIT 8"),
             runQuery("SELECT properties.$browser_language_prefix AS language, uniqExact(distinct_id) AS visitors FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY language ORDER BY visitors DESC LIMIT 8"),
-            runQuery("SELECT properties.step AS step, count() AS views FROM events WHERE event = 'checkout_step_viewed' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY step ORDER BY views DESC"),
+            runQuery("SELECT properties.step AS step_name, count() AS events, uniqExact(properties.$session_id) AS sessions, uniqExact(distinct_id) AS visitors FROM events WHERE event = 'checkout_step_viewed' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY step_name ORDER BY sessions DESC"),
             runQuery("SELECT properties.step AS step, properties.reason AS reason, count() AS failures FROM events WHERE event = 'checkout_validation_failed' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY step, reason ORDER BY failures DESC LIMIT 10"),
+            runQuery("SELECT uniqExact(distinct_id) AS tracked_identities, uniqExactIf(distinct_id, event = 'checkout_entered') AS checkout_identities, uniqExactIf(distinct_id, event = 'checkout_entered' AND distinct_id IN (SELECT distinct_id FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY)) AS checkout_with_pageview, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = '$pageview') AS pageview_sessions, uniqExact(coalesce(properties.$session_id, distinct_id)) AS all_sessions, countIf(event = '$pageview' AND notEmpty(toString(properties.$utm_source))) AS pageviews_with_utm, uniqExactIf(distinct_id, event = '$pageview' AND positionCaseInsensitive(coalesce(properties.$current_url, ''), 'fbclid') > 0) AS fbclid_visitors FROM events WHERE timestamp >= now() - INTERVAL 30 DAY"),
+            runQuery("SELECT countIf(event_count > 1) AS duplicate_sessions, max(event_count) AS max_per_session FROM (SELECT coalesce(properties.$session_id, distinct_id) AS session_id, count() AS event_count FROM events WHERE event = 'checkout_entered' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY session_id)"),
             loadEcbRates(),
             loadPaidOrderAnalytics(new Date(Math.max(previousSince.getTime(), analyticsProductionSince.getTime()))),
           ]);
@@ -1102,19 +1134,25 @@ function postHogReadApi(env: Record<string, string>) {
             entry.plus += order.flex_amount_minor / 100;
             financeCurrencies.set(currency, entry);
           }
-          const sourceVisitors = new Map<string, number>();
-          for (const [rawName, visitors] of sourceRows) {
+          const sourceChannels = new Map<string, { name: string; sessions: number; visitors: number; checkouts: number; payments: number }>();
+          for (const [rawName, sessions, visitors, sourceCheckouts, sourcePayments] of sourceRows) {
             const raw = String(rawName || "$direct").toLowerCase();
-            const name = ["eurogopass.com", "checkout.stripe.com"].includes(raw)
-              ? "$direct"
-              : ["facebook.com", "m.facebook.com", "lm.facebook.com", "l.facebook.com"].includes(raw)
-                ? "facebook.com"
-                : raw;
-            sourceVisitors.set(name, (sourceVisitors.get(name) ?? 0) + Number(visitors ?? 0));
+            const name = ["eurogopass.com", "checkout.stripe.com"].includes(raw) ? "internal"
+              : ["facebook.com", "www.facebook.com", "m.facebook.com", "lm.facebook.com", "l.facebook.com"].includes(raw) ? "facebook.com"
+                : raw === "com.google.android.gm" ? "gmail" : raw;
+            const entry = sourceChannels.get(name) ?? { name, sessions: 0, visitors: 0, checkouts: 0, payments: 0 };
+            entry.sessions += Number(sessions ?? 0);
+            entry.visitors += Number(visitors ?? 0);
+            entry.checkouts += Number(sourceCheckouts ?? 0);
+            entry.payments += Number(sourcePayments ?? 0);
+            sourceChannels.set(name, entry);
           }
+          const quality = qualityRows[0] ?? [];
+          const duplicates = duplicateRows[0] ?? [];
           const data: PostHogAnalytics = {
             periodDays: Math.min(30, Math.max(1, Math.ceil((now.getTime() - analyticsProductionSince.getTime()) / 86_400_000))),
             trackingDays: Math.min(30, Math.max(1, Math.ceil((now.getTime() - analyticsTrackingSince.getTime()) / 86_400_000))),
+            comparisonAvailable,
             generatedAt: new Date().toISOString(),
             summary: {
               visitors: Number(row[0] ?? 0),
@@ -1125,7 +1163,7 @@ function postHogReadApi(env: Record<string, string>) {
               paidOrders,
               funnelPaidOrders,
               totalEvents: Number(row[5] ?? 0),
-              conversion: checkouts ? Math.round((funnelPaidOrders / checkouts) * 1000) / 10 : 0,
+              conversion: Number(row[0] ?? 0) ? Math.round((funnelPaidOrders / Number(row[0] ?? 0)) * 1000) / 10 : 0,
               revenue: Math.round(revenue * 100) / 100,
               averageOrder: paidOrders ? Math.round(revenue / paidOrders * 100) / 100 : 0,
               productRevenue: Math.round(productRevenue * 100) / 100,
@@ -1143,6 +1181,10 @@ function postHogReadApi(env: Record<string, string>) {
               paymentFailures: Number(row[11] ?? 0),
               rageClicks: Number(row[12] ?? 0),
               warnings: Number(row[13] ?? 0),
+              checkoutEvents: Number(row[14] ?? 0),
+              paymentStartedEvents: Number(row[15] ?? 0),
+              checkoutVisitors: Number(row[16] ?? 0),
+              paidViewedSessions: Number(row[17] ?? 0),
             },
             previous: {
               visitors: Number(previous[0] ?? 0),
@@ -1156,7 +1198,10 @@ function postHogReadApi(env: Record<string, string>) {
               checkouts: trafficByDay.get(date)?.checkouts ?? 0,
               paidOrders: paidByDay.get(date) ?? 0,
             })),
-            sources: [...sourceVisitors].map(([name, visitors]) => ({ name, visitors })).sort((a, b) => b.visitors - a.visitors).slice(0, 6),
+            sources: [...sourceChannels.values()].sort((a, b) => b.sessions - a.sessions).slice(0, 8),
+            landingPages: landingRows.map(([path, sessions, visitors, landingCheckouts]) => ({ path: String(path || "/"), sessions: Number(sessions ?? 0), visitors: Number(visitors ?? 0), checkouts: Number(landingCheckouts ?? 0) })),
+            hourly: hourlyRows.map(([hour, sessions, hourlyCheckouts]) => ({ hour: Number(hour ?? 0), sessions: Number(sessions ?? 0), checkouts: Number(hourlyCheckouts ?? 0) })),
+            events: eventRows.map(([name, events, sessions, visitors]) => ({ name: String(name || "Unknown"), events: Number(events ?? 0), sessions: Number(sessions ?? 0), visitors: Number(visitors ?? 0) })),
             devices: deviceRows.map(([name, visitors]) => ({
               name: String(name || "Unknown"),
               visitors: Number(visitors ?? 0),
@@ -1168,8 +1213,19 @@ function postHogReadApi(env: Record<string, string>) {
             browsers: browserRows.map(([name, visitors]) => ({ name: String(name || "Unknown"), visitors: Number(visitors ?? 0) })),
             countries: countryRows.map(([name, visitors]) => ({ name: String(name || "Unknown"), visitors: Number(visitors ?? 0) })),
             languages: languageRows.map(([name, visitors]) => ({ name: String(name || "Unknown"), visitors: Number(visitors ?? 0) })),
-            checkoutSteps: stepRows.map(([name, views]) => ({ name: String(name || "Unknown"), views: Number(views ?? 0) })),
+            checkoutSteps: stepRows.map(([name, events, sessions, visitors]) => ({ name: String(name || "Unknown"), events: Number(events ?? 0), sessions: Number(sessions ?? 0), visitors: Number(visitors ?? 0) })),
             validationIssues: validationRows.map(([step, reason, count]) => ({ step: String(step || "Unknown"), reason: String(reason || "Unknown"), count: Number(count ?? 0) })),
+            dataQuality: {
+              trackedIdentities: Number(quality[0] ?? 0),
+              checkoutIdentities: Number(quality[1] ?? 0),
+              checkoutIdentitiesWithPageview: Number(quality[2] ?? 0),
+              pageviewSessions: Number(quality[3] ?? 0),
+              sessionsWithAnyEvent: Number(quality[4] ?? 0),
+              pageviewsWithUtmSource: Number(quality[5] ?? 0),
+              fbclidVisitors: Number(quality[6] ?? 0),
+              checkoutSessionsWithDuplicates: Number(duplicates[0] ?? 0),
+              maxCheckoutEventsPerSession: Number(duplicates[1] ?? 0),
+            },
             financeByCurrency: [...financeCurrencies.values()].sort((a, b) => b.gross - a.gross),
           };
           postHogCache = { at: Date.now(), data };

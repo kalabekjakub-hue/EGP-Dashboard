@@ -55,6 +55,7 @@ function pathForView(view: View, orderId?: string) {
 type PostHogAnalytics = {
   periodDays: number;
   trackingDays: number;
+  comparisonAvailable: boolean;
   generatedAt: string;
   summary: {
     visitors: number;
@@ -83,17 +84,29 @@ type PostHogAnalytics = {
     paymentFailures: number;
     rageClicks: number;
     warnings: number;
+    checkoutEvents: number;
+    paymentStartedEvents: number;
+    checkoutVisitors: number;
+    paidViewedSessions: number;
   };
   previous: { visitors: number; checkouts: number; paidOrders: number; revenue: number };
   daily: Array<{ date: string; visitors: number; checkouts: number; paidOrders: number }>;
-  sources: Array<{ name: string; visitors: number }>;
+  sources: Array<{ name: string; sessions: number; visitors: number; checkouts: number; payments: number }>;
+  landingPages: Array<{ path: string; sessions: number; visitors: number; checkouts: number }>;
+  hourly: Array<{ hour: number; sessions: number; checkouts: number }>;
+  events: Array<{ name: string; events: number; sessions: number; visitors: number }>;
   devices: Array<{ name: string; visitors: number }>;
   pages: Array<{ path: string; views: number }>;
   browsers: Array<{ name: string; visitors: number }>;
   countries: Array<{ name: string; visitors: number }>;
   languages: Array<{ name: string; visitors: number }>;
-  checkoutSteps: Array<{ name: string; views: number }>;
+  checkoutSteps: Array<{ name: string; events: number; sessions: number; visitors: number }>;
   validationIssues: Array<{ step: string; reason: string; count: number }>;
+  dataQuality: {
+    trackedIdentities: number; checkoutIdentities: number; checkoutIdentitiesWithPageview: number;
+    checkoutSessionsWithDuplicates: number; maxCheckoutEventsPerSession: number;
+    pageviewSessions: number; sessionsWithAnyEvent: number; pageviewsWithUtmSource: number; fbclidVisitors: number;
+  };
   financeByCurrency: Array<{ currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>;
 };
 
@@ -676,7 +689,7 @@ function PostHogPreview({ onOpen }: { onOpen: () => void }) {
         <span><small>Vstupy do checkoutu</small><strong>{integerFormat.format(summary.checkouts)}</strong></span>
         <span><small>Zaplacené objednávky</small><strong>{integerFormat.format(summary.paidOrders)}</strong></span>
         <span><small>Tržby</small><strong>{summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong></span>
-        <span><small>Konverze</small><strong>{summary.conversion.toLocaleString("cs-CZ")} %</strong></span>
+        <span><small>Nákupy / návštěvníci</small><strong>{summary.conversion.toLocaleString("cs-CZ")} %</strong></span>
       </div> : <div className={`posthog-state ${state}`}>{state === "loading" ? "Načítám data…" : "Data nejsou dostupná"}</div>}
       <ChevronRight className="posthog-open-icon" size={20} />
     </button>
@@ -783,7 +796,12 @@ function AttentionCenter({ incidents, onOpen, onClose }: { incidents: DashboardI
 
 function analyticsLabel(value: string) {
   const labels: Record<string, string> = {
-    "$direct": "Přímý vstup",
+    "$direct": "Přímý / nerozpoznaný",
+    "facebook.com": "Facebook",
+    "www.google.com": "Google",
+    gmail: "E-mail / Gmail",
+    internal: "Vlastní web / platební návrat",
+    "chatgpt.com": "ChatGPT",
     Mobile: "Mobil",
     Desktop: "Počítač",
     Tablet: "Tablet",
@@ -799,7 +817,7 @@ function analyticsLabel(value: string) {
   return labels[value] ?? value;
 }
 
-type AnalyticsTab = "overview" | "orders" | "finance" | "affiliate" | "traffic" | "behavior";
+type AnalyticsTab = "overview" | "orders" | "finance" | "affiliate" | "traffic" | "behavior" | "quality";
 
 function comparisonText(current: number, previous: number) {
   if (!previous) return current ? "Nová data" : "Beze změny";
@@ -819,8 +837,9 @@ function PostHogDetail({ back }: { back: () => void }) {
   if (state === "error" || !data) return <main className="page-shell analytics-page"><BackButton onClick={back} /><div className="analytics-loading surface error">PostHog se nepodařilo načíst.</div></main>;
   const { summary } = data;
   const maxFunnel = Math.max(summary.checkouts, 1);
-  const maxSource = Math.max(...data.sources.map(source => source.visitors), 1);
-  const maxStep = Math.max(...data.checkoutSteps.map(step => step.views), 1);
+  const maxStep = Math.max(...data.checkoutSteps.map(step => step.sessions), 1);
+  const maxLanding = Math.max(...data.landingPages.map(page => page.sessions), 1);
+  const maxHourly = Math.max(...data.hourly.map(hour => hour.sessions), 1);
   const chartMax = Math.max(...data.daily.map(day => day.checkouts), ...data.daily.map(day => day.paidOrders), 1);
   const chartWidth = 800;
   const chartHeight = 240;
@@ -835,7 +854,7 @@ function PostHogDetail({ back }: { back: () => void }) {
   }).join(" ");
   const checkoutPath = dailyChartPath(data.daily.map(day => day.checkouts));
   const paidPath = dailyChartPath(data.daily.map(day => day.paidOrders));
-  const comparisonNote = (current: number, previous: number) => data.periodDays >= 30
+  const comparisonNote = (current: number, previous: number) => data.comparisonAvailable
     ? `${comparisonText(current, previous)} proti předchozímu období`
     : "Bez srovnatelného předchozího období";
   const yTicks = Array.from({ length: 5 }, (_, index) => chartScaleMax - index * chartScaleMax / 4);
@@ -845,7 +864,7 @@ function PostHogDetail({ back }: { back: () => void }) {
   const formatShortDate = (value?: string) => value ? new Date(`${value}T12:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) : "–";
   return <main className="page-shell analytics-page">
     <BackButton onClick={back} />
-    <div className="analytics-heading"><div><span className="eyebrow">Prodeje {data.periodDays} dní · návštěvnost {data.trackingDays} dní</span><h1>PostHog</h1><p>Chování návštěvníků na eurogopass.com</p></div><div className="analytics-fresh"><span className="live-dot" />Aktualizováno {new Date(data.generatedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</div></div>
+    <div className="analytics-heading"><h1>Statistiky</h1><div className="analytics-fresh"><span className="live-dot" />Aktualizováno {new Date(data.generatedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</div></div>
     <section className="analytics-metrics">
       <article className="surface"><Users size={19} /><span>Návštěvníci</span><strong>{integerFormat.format(summary.visitors)}</strong><small>{comparisonNote(summary.visitors, data.previous.visitors)}</small></article>
       <article className="surface"><ShoppingCart size={19} /><span>Vstupy do checkoutu</span><strong>{integerFormat.format(summary.checkouts)}</strong><small>{comparisonNote(summary.checkouts, data.previous.checkouts)}</small></article>
@@ -853,7 +872,7 @@ function PostHogDetail({ back }: { back: () => void }) {
       <article className="surface"><BarChart3 size={19} /><span>Tržby</span><strong>{summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong><small>{comparisonNote(summary.revenue, data.previous.revenue)}</small></article>
     </section>
     <nav className="analytics-tabs surface" aria-label="Sekce analytiky">{[
-      ["overview", "Přehled"], ["orders", "Objednávky"], ["finance", "Finance"], ["affiliate", "Affiliate"], ["traffic", "Návštěvnost"], ["behavior", "Chování"],
+      ["overview", "Přehled"], ["orders", "Objednávky"], ["finance", "Finance"], ["affiliate", "Affiliate"], ["traffic", "Akvizice"], ["behavior", "Chování"], ["quality", "Kvalita dat"],
     ].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key as AnalyticsTab)}>{label}</button>)}</nav>
     {tab === "overview" && <section className="analytics-layout">
       <article className="analytics-chart surface">
@@ -870,10 +889,10 @@ function PostHogDetail({ back }: { back: () => void }) {
           <path className="checkout" d={checkoutPath} /><path className="paid" d={paidPath} />
         </svg>
       </article>
-      <article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Průchod objednávkou</h2><p>Počet událostí</p></div></div>{[
+      <article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Průchod checkoutem</h2><p>Unikátní relace v PostHogu</p></div></div>{[
         ["Vstup do checkoutu", summary.checkouts],
         ["Zahájení platby", summary.paymentStarted],
-        ["Objednávka zaplacena", summary.funnelPaidOrders],
+        ["Zobrazení potvrzení platby", summary.paidViewedSessions],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Rychlý souhrn</h2><p>Aktivita návštěvníků</p></div></div>{[
         ["Návštěvy stránek", summary.pageviews], ["Relace", summary.sessions], ["Vyhledané trasy", summary.routeSearches], ["Spočítané trasy", summary.routesCalculated],
@@ -885,18 +904,18 @@ function PostHogDetail({ back }: { back: () => void }) {
     </section>}
     {tab === "orders" && <section className="analytics-tab-content">
       <div className="analytics-stat-grid">
-        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Supabase paid_at · přepočteno kurzem ECB" previous={data.periodDays >= 30 ? { current: summary.revenue, value: data.previous.revenue } : undefined} />
+        <AnalyticsStat label="Tržby" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Supabase paid_at · přepočteno kurzem ECB" previous={data.comparisonAvailable ? { current: summary.revenue, value: data.previous.revenue } : undefined} />
         <AnalyticsStat label="Průměrná objednávka" value={summary.averageOrder.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="průměrná zaplacená částka" />
         <AnalyticsStat label="Plus" value={`${summary.flexOrders}×`} note={`${summary.paidOrders ? Math.round(summary.flexOrders / summary.paidOrders * 100) : 0} % objednávek`} />
         <AnalyticsStat label="Dálniční známky" value={integerFormat.format(summary.vignettes)} note="zaplacených položek" />
         <AnalyticsStat label="Mosty a tunely" value={integerFormat.format(summary.bridgeTolls)} note="zaplacených položek" />
       </div>
-      <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta</h2><p>Od checkoutu k zaplacení</p></div></div>{[
-        ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zaplacené objednávky", summary.funnelPaidOrders],
-      ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Aktivita kroků</h2><p>Zobrazení částí checkoutu</p></div></div>{data.checkoutSteps.map(step => <div className="rank-row" key={step.name}><span>{analyticsLabel(step.name)}</span><i><b style={{ width: `${step.views / maxStep * 100}%` }} /></i><strong>{step.views}</strong></div>)}</article></div>
+      <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta v PostHogu</h2><p>Relace; zaplacené objednávky ze Supabase jsou vedené samostatně</p></div></div>{[
+        ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zobrazené potvrzení platby", summary.paidViewedSessions],
+      ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Aktivita kroků</h2><p>Unikátní relace · vpravo počet událostí</p></div></div>{data.checkoutSteps.map(step => <div className="rank-row" key={step.name}><span>{analyticsLabel(step.name)} · {step.sessions} relací</span><i><b style={{ width: `${step.sessions / maxStep * 100}%` }} /></i><strong>{step.events}</strong></div>)}</article></div>
     </section>}
     {tab === "finance" && <section className="analytics-tab-content finance-analytics">
-      <div className="analytics-stat-grid">
+      <div className="analytics-stat-grid finance-stats">
         <AnalyticsStat label="Hrubý obrat" value={summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note={`${summary.paidOrders} zaplacených objednávek`} />
         <AnalyticsStat label="Hodnota produktů" value={summary.productRevenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Produkty účtované zákazníkům" />
         <AnalyticsStat label="Servisní poplatky" value={summary.processingRevenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="Před Stripe poplatky a náklady" />
@@ -916,18 +935,29 @@ function PostHogDetail({ back }: { back: () => void }) {
         <AnalyticsStat label="Affiliate tržby" value={affiliateData.summary.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="celková hodnota objednávek" />
         <AnalyticsStat label="Provize" value={affiliateData.summary.commission.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="celkem přiznané provize" />
         <AnalyticsStat label="Čekající provize" value={affiliateData.summary.pendingCommission.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })} note="dosud nevyplaceno" />
-        <AnalyticsStat label="Aktivní partneři" value={integerFormat.format(affiliateData.summary.activePartners)} note="affiliate účty se stavem active" />
       </div>
       <article className="affiliate-partners surface"><div className="analytics-card-head"><div><h2>Affiliate partneři</h2><p>Výkon za posledních {affiliateData.periodDays} dní</p></div><small>Aktualizováno {new Date(affiliateData.generatedAt).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</small></div>{affiliateData.partners.length ? <div className="affiliate-table"><div className="affiliate-table-head"><span>Partner</span><span>Objednávky</span><span>Tržby</span><span>Provize</span></div>{affiliateData.partners.map(partner => <div className="affiliate-table-row" key={partner.id}><span><strong>{partner.name}</strong><small>{partner.code} · {partner.commissionRate.toLocaleString("cs-CZ")} %</small></span><b>{partner.orders}</b><b>{partner.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</b><b>{partner.commission.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</b></div>)}</div> : <div className="affiliate-empty">Zatím není založený žádný affiliate partner.</div>}</article>
       {!affiliateData.summary.orders && <div className="affiliate-empty-note surface"><Activity size={20} /><div><strong>Zatím žádné affiliate nákupy</strong><span>Partner je připravený, ale žádná objednávka zatím nemá přiřazené <code>affiliate_id</code>.</span></div></div>}
     </section>)}
-    {tab === "traffic" && <section className="analytics-traffic-grid">
-      <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Zdroje návštěv</h2><p>Unikátní návštěvníci</p></div></div>{data.sources.map(source => <div className="rank-row" key={source.name}><span>{analyticsLabel(source.name)}</span><i><b style={{ width: `${source.visitors / maxSource * 100}%` }} /></i><strong>{source.visitors}</strong></div>)}</article>
+    {tab === "traffic" && <section className="analytics-tab-content">
+      <div className="analytics-stat-grid acquisition-stats">
+        <AnalyticsStat label="Relace" value={integerFormat.format(summary.sessions)} note={`${summary.visitors} unikátních návštěvníků`} />
+        <AnalyticsStat label="Zobrazení / relace" value={(summary.pageviews / Math.max(summary.sessions, 1)).toLocaleString("cs-CZ", { maximumFractionDigits: 1 })} note={`${summary.pageviews} pageviews`} />
+        <AnalyticsStat label="Checkout relace" value={integerFormat.format(summary.checkouts)} note={`${Math.round(summary.checkouts / Math.max(summary.sessions, 1) * 100)} % relací s pageview`} />
+        <AnalyticsStat label="Mobilní návštěvníci" value={`${Math.round((data.devices.find(device => device.name === "Mobile")?.visitors ?? 0) / Math.max(summary.visitors, 1) * 100)} %`} note="podle pageview identity" />
+      </div>
+      <div className="analytics-two-column acquisition-primary">
+        <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Výkon kanálů</h2><p>Relace · checkout · zahájení platby</p></div></div>{data.sources.map(source => <div className="channel-row" key={source.name}><div><strong>{analyticsLabel(source.name)}</strong><small>{source.visitors} lidí</small></div><span><b>{source.sessions}</b><small>relací</small></span><span><b>{source.checkouts}</b><small>checkout</small></span><span><b>{source.payments}</b><small>platba</small></span><em>{Math.round(source.checkouts / Math.max(source.sessions, 1) * 100)} %</em></div>)}</article>
+        <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Vstupní stránky</h2><p>První pageview relace · checkouty v závorce</p></div></div>{data.landingPages.map(page => <div className="rank-row" key={page.path}><span><code>{page.path}</code> · {page.visitors} lidí</span><i><b style={{ width: `${page.sessions / maxLanding * 100}%` }} /></i><strong>{page.sessions} ({page.checkouts})</strong></div>)}</article>
+      </div>
+      <article className="hourly-card surface"><div className="analytics-card-head"><div><h2>Aktivita během dne</h2><p>Europe/Prague · relace s pageview, zeleně checkouty</p></div></div><div className="hourly-chart">{Array.from({ length: 24 }, (_, hour) => data.hourly.find(row => row.hour === hour) ?? { hour, sessions: 0, checkouts: 0 }).map(row => <div className="hour-column" key={row.hour}><div><i style={{ height: `${Math.max(2, row.sessions / maxHourly * 100)}%` }}><b style={{ height: `${Math.min(100, row.checkouts / Math.max(row.sessions, 1) * 100)}%` }} /></i></div><strong>{row.sessions}</strong><small>{String(row.hour).padStart(2, "0")}</small></div>)}</div></article>
+      <div className="analytics-traffic-grid">
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Země návštěvníků</h2><p>Podle geolokace</p></div></div>{data.countries.map(country => <div className="device-row country-analytics" key={country.name}><span><Flag code={country.name} />{country.name}</span><strong>{country.visitors}</strong></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Zařízení</h2><p>Unikátní návštěvníci</p></div></div>{data.devices.map(device => <div className="device-row" key={device.name}><span>{analyticsLabel(device.name)}</span><strong>{device.visitors}</strong></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Prohlížeče</h2><p>Unikátní návštěvníci</p></div></div>{data.browsers.map(browser => <div className="device-row" key={browser.name}><span>{browser.name}</span><strong>{browser.visitors}</strong></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Jazyky</h2><p>Jazyk prohlížeče</p></div></div>{data.languages.map(language => <div className="device-row" key={language.name}><span>{language.name.toUpperCase()}</span><strong>{language.visitors}</strong></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Nejnavštěvovanější stránky</h2><p>Zobrazení stránek</p></div></div>{data.pages.map(page => <div className="device-row" key={page.path}><code>{page.path}</code><strong>{page.views}</strong></div>)}</article>
+      </div>
     </section>}
     {tab === "behavior" && <section className="analytics-tab-content">
       <div className="analytics-stat-grid behavior-stats">
@@ -941,6 +971,24 @@ function PostHogDetail({ back }: { back: () => void }) {
       <div className="analytics-two-column"><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Vyhledání trasy</h2><p>Průchod plánovačem</p></div></div>{[
         ["Zahájená vyhledávání", summary.routeSearches], ["Spočítané trasy", summary.routesCalculated],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / Math.max(summary.routeSearches, 1) * 100)}%` }} /></i><small>{Math.round(Number(value) / Math.max(summary.routeSearches, 1) * 100)} %</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Nejčastější chyby</h2><p>Validace formulářů</p></div></div>{data.validationIssues.map(issue => <div className="issue-row" key={`${issue.step}:${issue.reason}`}><div><strong>{analyticsLabel(issue.reason)}</strong><small>{analyticsLabel(issue.step)}</small></div><b>{issue.count}×</b></div>)}</article></div>
+    </section>}
+    {tab === "quality" && <section className="analytics-tab-content quality-tab">
+      <div className="analytics-stat-grid quality-stats">
+        <AnalyticsStat label="Pokrytí checkout identit" value={`${Math.round(data.dataQuality.checkoutIdentitiesWithPageview / Math.max(data.dataQuality.checkoutIdentities, 1) * 100)} %`} note={`${data.dataQuality.checkoutIdentitiesWithPageview} z ${data.dataQuality.checkoutIdentities} má pageview`} />
+        <AnalyticsStat label="Duplicitní checkout relace" value={integerFormat.format(data.dataQuality.checkoutSessionsWithDuplicates)} note={`maximum ${data.dataQuality.maxCheckoutEventsPerSession} událostí v relaci`} />
+        <AnalyticsStat label="UTM pokrytí" value={`${Math.round(data.dataQuality.pageviewsWithUtmSource / Math.max(summary.pageviews, 1) * 100)} %`} note={`${data.dataQuality.pageviewsWithUtmSource} z ${summary.pageviews} pageviews`} />
+        <AnalyticsStat label="Relace s pageview" value={`${Math.round(data.dataQuality.pageviewSessions / Math.max(data.dataQuality.sessionsWithAnyEvent, 1) * 100)} %`} note={`${data.dataQuality.pageviewSessions} z ${data.dataQuality.sessionsWithAnyEvent} sledovaných relací`} />
+      </div>
+      <div className="analytics-two-column">
+        <article className="quality-audit surface"><div className="analytics-card-head"><div><h2>Audit měření</h2><p>Automaticky odvozené kontroly z živých dat</p></div></div>{[
+          { label: "Checkout identity mají odpovídající pageview", value: `${data.dataQuality.checkoutIdentitiesWithPageview}/${data.dataQuality.checkoutIdentities}`, ok: data.dataQuality.checkoutIdentitiesWithPageview === data.dataQuality.checkoutIdentities },
+          { label: "checkout_entered je jednou za relaci", value: `${data.dataQuality.checkoutSessionsWithDuplicates} duplicit`, ok: data.dataQuality.checkoutSessionsWithDuplicates === 0 },
+          { label: "Kampaně používají UTM source", value: `${data.dataQuality.pageviewsWithUtmSource} pageviews`, ok: data.dataQuality.pageviewsWithUtmSource > 0 },
+          { label: "fbclid je zachycen a atribuován", value: `${data.dataQuality.fbclidVisitors} návštěvníků`, ok: true },
+          { label: "Historické srovnání je dostupné", value: data.comparisonAvailable ? "ano" : "zatím ne", ok: data.comparisonAvailable },
+        ].map(check => <div className={`audit-row ${check.ok ? "ok" : "warn"}`} key={check.label}><i>{check.ok ? "✓" : "!"}</i><span><strong>{check.label}</strong><small>{check.value}</small></span></div>)}</article>
+        <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Objem událostí</h2><p>Události · relace · identity</p></div></div>{data.events.map(event => <div className="event-row" key={event.name}><code>{event.name}</code><span>{event.events}<small>událostí</small></span><span>{event.sessions}<small>relací</small></span><span>{event.visitors}<small>identit</small></span></div>)}</article>
+      </div>
     </section>}
   </main>;
 }
