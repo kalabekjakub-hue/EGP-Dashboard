@@ -34,6 +34,7 @@ export type Order = {
   email: string;
   createdAt: string;
   paidAt: string;
+  originalPendingCreatedAt?: string;
   total: number;
   currency?: string;
   profit?: number;
