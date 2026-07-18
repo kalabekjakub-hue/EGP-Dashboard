@@ -200,10 +200,18 @@ function supabaseReadApi() {
             if (!response.ok) throw new Error(`${table} API ${response.status}`);
             return response.json() as Promise<RawItem[]>;
           };
-          const [vignettes, tolls] = await Promise.all([
+          const loadOfficialDocuments = async () => {
+            if (!ids.length) return [] as Array<{ order_id: string; country_code?: string }>;
+            const response = await fetch(`${url}/rest/v1/order_documents?select=order_id,country_code&order_id=in.${encodedIds}`, { headers });
+            if (!response.ok) throw new Error(`order_documents API ${response.status}`);
+            return response.json() as Promise<Array<{ order_id: string; country_code?: string }>>;
+          };
+          const [vignettes, tolls, officialDocuments] = await Promise.all([
             loadItems("order_items", vignetteSelect),
             loadItems("order_bridge_toll_items", tollSelect),
+            loadOfficialDocuments(),
           ]);
+          const officialDocumentKeys = new Set(officialDocuments.map(document => `${document.order_id}|${String(document.country_code ?? "").toUpperCase()}`));
           const allItems: RawItem[] = [
             ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
             ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
@@ -235,7 +243,7 @@ function supabaseReadApi() {
                 failedAt: item.failed_at,
                 lastError: item.last_error,
                 createdAtIso: item.created_at,
-                pdfAvailable: Boolean(item.pdf_storage_path),
+                pdfAvailable: Boolean(item.pdf_storage_path) || officialDocumentKeys.has(`${item.order_id}|${item.country_code.toUpperCase()}`),
                 screenshotsAvailable: Boolean(item.fulfillment_screenshots_meta?.steps?.length),
               };
             });
