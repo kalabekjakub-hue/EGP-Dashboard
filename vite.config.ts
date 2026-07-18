@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
+import { editorialApi } from "./editorial-api";
 
 const execFileAsync = promisify(execFile);
 const authSessions = new Map<string, { email: string; expiresAt: number }>();
@@ -21,7 +22,7 @@ function dashboardWritePolicy() {
           return;
         }
         const route = (req.url ?? "/").split("?")[0];
-        if (method === "POST" && route === "/orders/fulfill-item") {
+        if ((method === "POST" && route === "/orders/fulfill-item") || route.startsWith("/editorial/")) {
           next();
           return;
         }
@@ -1264,5 +1265,5 @@ export default defineConfig(({ mode }) => {
 });
 
 export function createApiPlugins(env: Record<string, string>) {
-  return [authApi(), dashboardWritePolicy(), manualFulfillmentApi(), affiliateAnalyticsApi(), supabaseReadApi(), gmailIngestReadApi(), documentReadApi(), screenshotReadApi(), workerStatusApi(), workerLogProxy(), postHogReadApi(env)];
+  return [authApi(), dashboardWritePolicy(), editorialApi(), manualFulfillmentApi(), affiliateAnalyticsApi(), supabaseReadApi(), gmailIngestReadApi(), documentReadApi(), screenshotReadApi(), workerStatusApi(), workerLogProxy(), postHogReadApi(env)];
 }

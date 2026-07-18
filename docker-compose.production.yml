@@ -45,6 +45,22 @@ services:
         max-size: 10m
         max-file: "3"
 
+  editorial-worker:
+    build: .
+    container_name: egp-admin-editorial
+    restart: unless-stopped
+    network_mode: host
+    command: ["npm", "run", "editorial:worker"]
+    env_file:
+      - secrets/production.env
+    environment:
+      EDITORIAL_POLL_INTERVAL_MS: 300000
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   caddy:
     image: caddy:2-alpine
     container_name: egp-admin-caddy

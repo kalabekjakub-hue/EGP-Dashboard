@@ -20,15 +20,20 @@ import {
   Search,
   Settings,
   ShoppingCart,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
 import { orders as demoOrders, portalLinks, type Order, type OrderItem, type OrderStatus } from "./data";
+import { EditorialArticleEditor, EditorialHome, EditorialPreview } from "./editorial";
 
-type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "settings";
+type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article" | "settings";
 
-function routeFromPath(pathname = window.location.pathname): { view: View; orderId?: string } {
+function routeFromPath(pathname = window.location.pathname): { view: View; orderId?: string; articleId?: string } {
   const path = pathname.replace(/\/+$/, "") || "/";
+  const editorialArticle = path.match(/^\/editorial\/([^/]+)$/);
+  if (editorialArticle) return { view: "editorial-article", articleId: decodeURIComponent(editorialArticle[1]) };
+  if (path === "/editorial") return { view: "editorial" };
   const orderAsset = path.match(/^\/orders\/([^/]+)\/(screenshots|documents)$/);
   if (orderAsset) return { view: orderAsset[2] as "screenshots" | "documents", orderId: decodeURIComponent(orderAsset[1]) };
   const order = path.match(/^\/orders\/([^/]+)$/);
@@ -48,6 +53,7 @@ function pathForView(view: View, orderId?: string) {
   if (view === "screenshots") return encodedOrder ? `/orders/${encodedOrder}/screenshots` : "/screenshots";
   if (view === "documents") return encodedOrder ? `/orders/${encodedOrder}/documents` : "/documents";
   if (view === "posthog") return "/analytics";
+  if (view === "editorial") return "/editorial";
   if (view === "logs") return "/logs";
   return "/";
 }
@@ -528,8 +534,9 @@ function statusDate(value: string | null) {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function Header({ goHome, navigate, onLogout }: { goHome: () => void; navigate: (view: View) => void; onLogout: () => void }) {
+function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () => void; navigate: (view: View) => void; onClearAttention: () => void; onLogout: () => void }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [linksOpen, setLinksOpen] = useState(false);
   const [worker, setWorker] = useState<"egp" | "wise" | null>(null);
   const [workersStatus, setWorkersStatus] = useState<WorkersStatus | null>(null);
@@ -559,12 +566,14 @@ function Header({ goHome, navigate, onLogout }: { goHome: () => void; navigate: 
     const closeOutside = (event: MouseEvent) => {
       if (!settingsRef.current?.contains(event.target as Node)) {
         setMenuOpen(false);
+        setSettingsOpen(false);
         setLinksOpen(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setMenuOpen(false);
+        setSettingsOpen(false);
         setLinksOpen(false);
       }
     };
@@ -613,11 +622,12 @@ function Header({ goHome, navigate, onLogout }: { goHome: () => void; navigate: 
         </div>
         <time>{now.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" })} · {now.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</time>
         <div className="settings-wrap" ref={settingsRef}>
-          <button className="icon-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Otevřít nabídku"><Settings size={20} /></button>
+          <button className="icon-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Otevřít nabídku"><Plus size={20} /></button>
           {menuOpen && (
             <div className="settings-menu">
-              <button><Settings size={16} /> Nastavení</button>
-              <button onClick={() => setLinksOpen(!linksOpen)}>Odkazy <ChevronLeft size={16} /></button>
+              <button onClick={() => { setSettingsOpen(!settingsOpen); setLinksOpen(false); }}><Settings size={16} /> Nastavení <ChevronLeft size={16} /></button>
+              {settingsOpen && <div className="settings-submenu"><button onClick={() => { onClearAttention(); setMenuOpen(false); setSettingsOpen(false); setLinksOpen(false); }}><Trash2 size={16} /> Vymazat centrum pozornosti</button></div>}
+              <button onClick={() => { setLinksOpen(!linksOpen); setSettingsOpen(false); }}>Odkazy <ChevronLeft size={16} /></button>
               {linksOpen && <div className="links-submenu">
                 {externalLinks.map(([label, url]) => <a key={label} href={url} target="_blank" rel="noreferrer">{label}<ExternalLink size={13} /></a>)}
                 <div className="portal-menu">
@@ -702,7 +712,7 @@ type DashboardIncident = {
   title: string;
   detail: string;
   orderId?: string;
-  target?: "logs" | "screenshots" | "documents";
+  target?: View;
 };
 
 function pragueDay(value?: string) {
@@ -1105,10 +1115,45 @@ function LiveLog({ expand, expanded = false }: { expand: () => void; expanded?: 
   );
 }
 
+const dismissedAttentionStorageKey = "egp-dismissed-attention-incidents";
+
 function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; navigate: (view: View) => void; openOrder: (order: Order) => void }) {
   const workers = useWorkerStatusSnapshot();
   const [attentionOpen, setAttentionOpen] = useState(false);
-  const overview = useMemo(() => buildDashboardOverview(orderData, workers), [orderData, workers]);
+  const [editorialIncidents, setEditorialIncidents] = useState<DashboardIncident[]>([]);
+  const [dismissedIncidentIds, setDismissedIncidentIds] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(window.sessionStorage.getItem(dismissedAttentionStorageKey) ?? "[]") as string[]); }
+    catch { return new Set(); }
+  });
+  useEffect(() => {
+    let active = true;
+    const load = () => void fetch("/api/editorial/topics", { headers: { Accept: "application/json" } }).then(response => response.ok ? response.json() as Promise<{ topics?: Array<{ id: string; topic: string; status: string; last_error?: string | null }> }> : Promise.reject()).then(payload => {
+      if (!active) return;
+      const topics = payload.topics ?? [];
+      const review = topics.filter(topic => topic.status === "review");
+      const failed = topics.filter(topic => topic.status === "failed");
+      const incidents: DashboardIncident[] = [];
+      if (review.length) incidents.push({ id: `editorial:review:${review.map(topic => topic.id).join(",")}`, tone: "warning", title: `${review.length} článků čeká na kontrolu`, detail: "Otevři redakci a zkontroluj české koncepty", target: "editorial" });
+      failed.forEach(topic => incidents.push({ id: `editorial:failed:${topic.id}`, tone: "error", title: "Generování článku selhalo", detail: topic.last_error || topic.topic, target: "editorial" }));
+      setEditorialIncidents(incidents);
+    }).catch(() => undefined);
+    load(); const timer = window.setInterval(load, 30_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+  const fullOverview = useMemo(() => { const base = buildDashboardOverview(orderData, workers); return { ...base, incidents: [...editorialIncidents, ...base.incidents] }; }, [editorialIncidents, orderData, workers]);
+  const overview = useMemo(() => ({ ...fullOverview, incidents: fullOverview.incidents.filter(incident => !dismissedIncidentIds.has(incident.id)) }), [dismissedIncidentIds, fullOverview]);
+  useEffect(() => {
+    const clear = () => {
+      setDismissedIncidentIds(current => {
+        const next = new Set([...current, ...fullOverview.incidents.map(incident => incident.id)]);
+        window.sessionStorage.setItem(dismissedAttentionStorageKey, JSON.stringify([...next]));
+        return next;
+      });
+      setAttentionOpen(false);
+    };
+    window.addEventListener("egp-clear-attention", clear);
+    return () => window.removeEventListener("egp-clear-attention", clear);
+  }, [fullOverview.incidents]);
   const openIncident = (incident: DashboardIncident) => {
     if (incident.orderId) {
       const order = orderData.find(candidate => candidate.id === incident.orderId);
@@ -1127,6 +1172,7 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
         <div className="dashboard-overview">
           <DailySummaryCard overview={overview} onOpenAttention={() => setAttentionOpen(true)} />
           <PostHogPreview onOpen={() => navigate("posthog")} />
+          <EditorialPreview onOpen={() => navigate("editorial")} />
         </div>
         <LiveLog expand={() => navigate("logs")} />
       </div>
@@ -1422,6 +1468,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
   const initialRoute = useMemo(() => routeFromPath(), []);
   const [view, setView] = useState<View>(initialRoute.view);
   const [routeOrderId, setRouteOrderId] = useState(initialRoute.orderId ?? "");
+  const [routeArticleId, setRouteArticleId] = useState(initialRoute.articleId ?? "");
   const [orderData, setOrderData] = useState<Order[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order>(demoOrders[0]);
   useEffect(() => {
@@ -1430,6 +1477,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
       const route = routeFromPath();
       setView(route.view);
       setRouteOrderId(route.orderId ?? "");
+      setRouteArticleId(route.articleId ?? "");
       window.scrollTo({ top: 0 });
     };
     window.addEventListener("popstate", onPopState);
@@ -1465,6 +1513,12 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     setView("order");
     window.scrollTo({ top: 0 });
   };
+  const openArticle = (articleId: string) => {
+    setRouteArticleId(articleId);
+    window.history.pushState({ egp: true }, "", `/editorial/${encodeURIComponent(articleId)}`);
+    setView("editorial-article");
+    window.scrollTo({ top: 0 });
+  };
   const goBack = () => {
     if (window.history.state?.egp && !window.history.state?.entry) window.history.back();
     else navigate("dashboard", true);
@@ -1478,7 +1532,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     setSelectedOrder(current => update(current));
     setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} back={goBack} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}</>;
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} back={goBack} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor articleId={routeArticleId} back={goBack} />}</>;
 }
 
 export default function App() {
