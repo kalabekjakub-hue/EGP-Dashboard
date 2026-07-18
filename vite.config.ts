@@ -188,7 +188,7 @@ function supabaseReadApi() {
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
           const headers = { apikey: key, Authorization: `Bearer ${key}` };
           const orderSelect = "id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,invoice_pdf_path,last_error,vehicle_type,fuel_type,vehicle_vin";
-          const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=50`, { headers });
+          const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=200`, { headers });
           if (!orderResponse.ok) throw new Error(`Orders API ${orderResponse.status}`);
           const rawOrders = await orderResponse.json() as RawOrder[];
           const ids = rawOrders.map(order => order.id);
@@ -217,7 +217,33 @@ function supabaseReadApi() {
             ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
             ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
           ];
-          const data = rawOrders.map(order => {
+          const normalizedPlate = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          const itemSignature = (orderId: string) => JSON.stringify(allItems
+            .filter(item => item.order_id === orderId)
+            .map(item => item.source === "order_bridge_toll_items"
+              ? ["toll", item.toll_id ?? "", item.country_code.toUpperCase(), item.pass_count ?? 1, item.pass_date ?? ""]
+              : ["vignette", item.country_code.toUpperCase(), item.validity ?? "", item.start_date ?? "", item.end_date ?? ""])
+            .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
+          const hiddenPendingIds = new Set<string>();
+          const originalPendingCreatedAt = new Map<string, string>();
+          const paidOrders = rawOrders.filter(order => Boolean(order.paid_at)).sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at));
+          for (const paidOrder of paidOrders) {
+            const paidSignature = itemSignature(paidOrder.id);
+            if (paidSignature === "[]") continue;
+            const matches = rawOrders.filter(candidate =>
+              !hiddenPendingIds.has(candidate.id)
+              && !candidate.paid_at
+              && ["pending", "awaiting_payment"].includes(candidate.status.toLowerCase().replace(/[\s-]+/g, "_"))
+              && Date.parse(candidate.created_at) < Date.parse(paidOrder.created_at)
+              && normalizedPlate(candidate.plate) === normalizedPlate(paidOrder.plate)
+              && candidate.registration_country.toUpperCase() === paidOrder.registration_country.toUpperCase()
+              && itemSignature(candidate.id) === paidSignature
+            );
+            if (!matches.length) continue;
+            matches.forEach(match => hiddenPendingIds.add(match.id));
+            originalPendingCreatedAt.set(paidOrder.id, matches.reduce((earliest, match) => Date.parse(match.created_at) < Date.parse(earliest) ? match.created_at : earliest, matches[0].created_at));
+          }
+          const data = rawOrders.filter(order => !hiddenPendingIds.has(order.id)).slice(0, 50).map(order => {
             const items = allItems.filter(item => item.order_id === order.id).map(item => {
               const status = itemStatus(item);
               const passage = item.source === "order_bridge_toll_items" ? passageDisplay(item.toll_id) : undefined;
@@ -256,7 +282,7 @@ function supabaseReadApi() {
             return {
               id: order.id, number: order.order_number, plate: order.plate,
               registrationCountry: order.registration_country, registrationCode: order.registration_country.toLowerCase(),
-              email: order.email, createdAt: formatDate(order.created_at), paidAt: formatDate(order.paid_at),
+              email: order.email, createdAt: formatDate(order.created_at), paidAt: formatDate(order.paid_at), originalPendingCreatedAt: originalPendingCreatedAt.has(order.id) ? formatDate(originalPendingCreatedAt.get(order.id)) : undefined,
               total: order.amount_total_minor / 100,
               currency: order.currency,
               profit: order.processing_fee_minor / 100,
