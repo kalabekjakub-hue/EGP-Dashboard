@@ -33,6 +33,50 @@ function config() {
   };
 }
 
+type AiTokenUsage = { inputTokens: number; cachedInputTokens: number; outputTokens: number; estimatedCostUsd: number | null };
+
+// Standard token prices in USD per 1M tokens, captured from OpenAI pricing on 2026-07-19.
+const tokenPrices: Record<string, { input: number; cachedInput: number; output: number }> = {
+  "gpt-5.6-terra": { input: 2.5, cachedInput: 0.25, output: 15 },
+  "gpt-5.6-luna": { input: 1, cachedInput: 0.1, output: 6 },
+};
+
+function aiTokenUsage(payload: Record<string, unknown>, requestedModel: string): AiTokenUsage {
+  const usage = payload.usage && typeof payload.usage === "object" ? payload.usage as Record<string, unknown> : {};
+  const details = usage.input_tokens_details && typeof usage.input_tokens_details === "object" ? usage.input_tokens_details as Record<string, unknown> : {};
+  const inputTokens = Math.max(0, Number(usage.input_tokens ?? 0));
+  const cachedInputTokens = Math.min(inputTokens, Math.max(0, Number(details.cached_tokens ?? 0)));
+  const outputTokens = Math.max(0, Number(usage.output_tokens ?? 0));
+  const model = String(payload.model ?? requestedModel).replace(/-\d{4}-\d{2}-\d{2}$/, "");
+  const price = tokenPrices[model] ?? tokenPrices[requestedModel];
+  const estimatedCostUsd = price ? ((inputTokens - cachedInputTokens) * price.input + cachedInputTokens * price.cachedInput + outputTokens * price.output) / 1_000_000 : null;
+  return { inputTokens, cachedInputTokens, outputTokens, estimatedCostUsd };
+}
+
+function generationUsageRecord(usage: AiTokenUsage | null) {
+  return usage ? { input_tokens: usage.inputTokens, output_tokens: usage.outputTokens, estimated_cost_usd: usage.estimatedCostUsd === null ? null : Number(usage.estimatedCostUsd.toFixed(6)) } : {};
+}
+
+let cachedUsdCzk = 21.171;
+let usdCzkFetchedAt = 0;
+
+async function usdCzkRate() {
+  if (Date.now() - usdCzkFetchedAt < 6 * 60 * 60 * 1000) return cachedUsdCzk;
+  try {
+    const response = await fetch("https://www.cnb.cz/en/financial_markets/foreign_exchange_market/exchange_rate_fixing/daily.txt");
+    if (!response.ok) throw new Error(`ČNB ${response.status}`);
+    const usd = (await response.text()).split(/\r?\n/).find(line => line.includes("|USD|"))?.split("|");
+    const amount = Number(usd?.[2]?.replace(",", "."));
+    const rate = Number(usd?.[4]?.replace(",", "."));
+    if (!amount || !rate) throw new Error("Kurz USD nebyl v kurzovním lístku nalezen");
+    cachedUsdCzk = rate / amount;
+    usdCzkFetchedAt = Date.now();
+  } catch {
+    usdCzkFetchedAt = Date.now();
+  }
+  return cachedUsdCzk;
+}
+
 async function supabase(path: string, init: RequestInit = {}) {
   const { supabaseUrl, supabaseKey } = config();
   if (!supabaseUrl || !supabaseKey) throw new Error("Supabase konfigurace není dostupná");
@@ -168,14 +212,26 @@ const translationSchema = {
 const topicSchema = { type: "object", additionalProperties: false, required: ["topic"], properties: { topic: { type: "string" } } };
 
 async function listArticles() {
+  const currentUsdCzk = await usdCzkRate();
   const posts = await supabase("blog_posts?select=*&order=updated_at.desc") as Array<Record<string, unknown>>;
   let translations: Array<Record<string, unknown>>;
   try { translations = await supabase("blog_post_translations?select=*&order=locale.asc") as Array<Record<string, unknown>>; }
   catch { translations = []; }
   let drafts: Array<Record<string, unknown>> = [];
   try { drafts = await supabase("blog_translation_drafts?select=*") as Array<Record<string, unknown>>; } catch { /* migration not applied yet */ }
+  let generationRuns: Array<Record<string, unknown>> = [];
+  try { generationRuns = await supabase("blog_generation_runs?post_id=not.is.null&select=post_id,input_tokens,output_tokens,estimated_cost_usd") as Array<Record<string, unknown>>; } catch { /* migration not applied yet */ }
   return posts.map(post => ({
     ...post,
+    ai_usage: (() => {
+      const usage = generationRuns.filter(run => run.post_id === post.id).reduce<{ input_tokens: number; output_tokens: number; total_tokens: number; estimated_cost_usd: number }>((total, run) => ({
+        input_tokens: total.input_tokens + Number(run.input_tokens ?? 0),
+        output_tokens: total.output_tokens + Number(run.output_tokens ?? 0),
+        total_tokens: total.total_tokens + Number(run.input_tokens ?? 0) + Number(run.output_tokens ?? 0),
+        estimated_cost_usd: total.estimated_cost_usd + Number(run.estimated_cost_usd ?? 0),
+      }), { input_tokens: 0, output_tokens: 0, total_tokens: 0, estimated_cost_usd: 0 });
+      return { ...usage, estimated_cost_czk: usage.estimated_cost_usd * currentUsdCzk };
+    })(),
     translations: [...new Set([
       ...translations.filter(row => row.post_id === post.id).map(row => String(row.locale)),
       ...drafts.filter(row => row.post_id === post.id).map(row => String(row.locale)),
@@ -211,16 +267,19 @@ async function generateArticle(topicId: string) {
   const runId = randomUUID();
   const { articleModel } = config();
   await supabase("blog_generation_runs", { method: "POST", body: JSON.stringify({ id: runId, topic_id: topicId, run_type: "article", status: "running", source_locale: "cs", provider: "openai", model: articleModel }) });
+  let recordedUsage: AiTokenUsage | null = null;
   try {
     const target = Number(topic.target_characters ?? 2200);
     const guidance = await editorialGuidance();
     const prompt = `Napiš praktický český SEO článek pro EuroGoPass na téma: ${topic.topic}. Cíl je ${target} znaků včetně mezer, přijatelná odchylka 20 %. Udělej internetovou rešerši. Důležitá fakta ověř z více zdrojů, ceny a právní pravidla preferenčně z oficiálních zdrojů. Text musí dát přímou odpověď hned v úvodu, být přehledný a informační. EuroGoPass nabídni organicky pouze v posledním odstavci jako způsob, jak vyřídit potřebné dálniční známky na jednom místě. Nepoužívej neověřené superlativy. body_md vrať jako čistý Markdown bez H1 (titulek je samostatně). countries vrať jako ISO alpha-2 kódy. claims obsahuje jen důležitá faktická tvrzení, verified označ true pouze při skutečném ověření rešerší a source_urls musí obsahovat přesné plné URL zdrojů použitých pro dané tvrzení.${guidance ? `\n\n${guidance}` : ""}`;
     const generated = await openaiResponse(prompt, "eurogopass_article", articleSchema, articleModel, true);
+    recordedUsage = aiTokenUsage(generated.raw, articleModel);
     const article = generated.data;
     const post = (await supabase("blog_posts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
       slug: slugify(String(article.slug ?? article.title)), status: "draft", countries: article.countries, tags: article.tags,
       source_provider: "openai", source_model: articleModel, source_topic: topic.topic,
     }) }) as Array<Record<string, unknown>>)[0];
+    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ post_id: post.id, ...generationUsageRecord(recordedUsage) }) });
     const translation = (await supabase("blog_post_translations", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
       post_id: post.id, locale: "cs", title: article.title, excerpt: article.excerpt, body_md: article.body_md,
       slug: slugify(String(article.slug ?? article.title)), seo_title: article.seo_title, seo_description: article.seo_description,
@@ -236,12 +295,12 @@ async function generateArticle(topicId: string) {
       if (links.length) await supabase("blog_claim_sources", { method: "POST", body: JSON.stringify(links) });
     }
     await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(topicId)}`, { method: "PATCH", body: JSON.stringify({ status: "review", post_id: post.id, updated_at: new Date().toISOString() }) });
-    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", finished_at: new Date().toISOString() }) });
+    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
     return { post, translation };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Generování selhalo";
     await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(topicId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", last_error: message, updated_at: new Date().toISOString() }) }).catch(() => undefined);
-    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "failed", error: message, finished_at: new Date().toISOString() }) }).catch(() => undefined);
+    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "failed", ...generationUsageRecord(recordedUsage), error: message, finished_at: new Date().toISOString() }) }).catch(() => undefined);
     throw error;
   }
 }
@@ -290,18 +349,30 @@ async function generateTranslations(postId: string, sourceLocale: string) {
   const { translationModel } = config();
   const guidance = await editorialGuidance();
   for (let index = 0; index < targets.length; index += 6) {
-    const locales = targets.slice(index, index + 6);
-    const prompt = `Přelož následující článek z jazyka ${sourceLocale} do přesně těchto locale: ${locales.join(", ")}. Zachovej význam, fakta, Markdown strukturu a přirozený organický závěrečný odstavec o EuroGoPass. Titulek, SEO metadata, slug a alt text lokalizuj přirozeně pro každý jazyk. Nevkládej nové skutečnosti.\n\nTitulek: ${source.title}\nPerex: ${source.excerpt}\nSEO title: ${source.seo_title ?? ""}\nSEO description: ${source.seo_description ?? ""}\nObsah:\n${source.body_md}${guidance ? `\n\n${guidance}` : ""}`;
-    const generated = await openaiResponse(prompt, "eurogopass_translations", translationSchema, translationModel, false);
-    const rows = Array.isArray(generated.data.translations) ? generated.data.translations as Array<Record<string, unknown>> : [];
-    for (const row of rows) {
-      const locale = String(row.locale);
-      if (!locales.includes(locale)) continue;
-      await supabase("blog_translation_drafts?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({
-        post_id: postId, locale, title: row.title, excerpt: row.excerpt, body_md: row.body_md, slug: slugify(String(row.slug ?? row.title)), seo_title: row.seo_title, seo_description: row.seo_description, hero_image_alt: row.hero_image_alt,
-        common_revision: nextRevision, local_revision: 0, source_locale: sourceLocale, manually_edited: false, content_hash: hashContent(`${row.title}\n${row.body_md}`), save_state: "version", updated_at: new Date().toISOString(),
+      const locales = targets.slice(index, index + 6);
+      const runId = randomUUID();
+      let recordedUsage: AiTokenUsage | null = null;
+      await supabase("blog_generation_runs", { method: "POST", body: JSON.stringify({
+        id: runId, post_id: postId, run_type: "translation", status: "running", source_locale: sourceLocale, target_locales: locales, provider: "openai", model: translationModel,
       }) });
-    }
+      try {
+        const prompt = `Přelož následující článek z jazyka ${sourceLocale} do přesně těchto locale: ${locales.join(", ")}. Zachovej význam, fakta, Markdown strukturu a přirozený organický závěrečný odstavec o EuroGoPass. Titulek, SEO metadata, slug a alt text lokalizuj přirozeně pro každý jazyk. Nevkládej nové skutečnosti.\n\nTitulek: ${source.title}\nPerex: ${source.excerpt}\nSEO title: ${source.seo_title ?? ""}\nSEO description: ${source.seo_description ?? ""}\nObsah:\n${source.body_md}${guidance ? `\n\n${guidance}` : ""}`;
+        const generated = await openaiResponse(prompt, "eurogopass_translations", translationSchema, translationModel, false);
+        recordedUsage = aiTokenUsage(generated.raw, translationModel);
+        const rows = Array.isArray(generated.data.translations) ? generated.data.translations as Array<Record<string, unknown>> : [];
+        for (const row of rows) {
+          const locale = String(row.locale);
+          if (!locales.includes(locale)) continue;
+          await supabase("blog_translation_drafts?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({
+            post_id: postId, locale, title: row.title, excerpt: row.excerpt, body_md: row.body_md, slug: slugify(String(row.slug ?? row.title)), seo_title: row.seo_title, seo_description: row.seo_description, hero_image_alt: row.hero_image_alt,
+            common_revision: nextRevision, local_revision: 0, source_locale: sourceLocale, manually_edited: false, content_hash: hashContent(`${row.title}\n${row.body_md}`), save_state: "version", updated_at: new Date().toISOString(),
+          }) });
+        }
+        await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
+      } catch (error) {
+        await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "failed", ...generationUsageRecord(recordedUsage), error: error instanceof Error ? error.message : "Neznámá chyba", finished_at: new Date().toISOString() }) }).catch(() => undefined);
+        throw error;
+      }
   }
   await saveDraft(postId, sourceLocale, { ...source, common_revision: nextRevision, local_revision: 0, resetLocalRevision: true, source_locale: sourceLocale, saveMode: "autosave" });
   return { commonRevision: nextRevision, locales: targets, skippedLocales: editorialLocales.filter(locale => locale !== sourceLocale && !targets.includes(locale)) };
