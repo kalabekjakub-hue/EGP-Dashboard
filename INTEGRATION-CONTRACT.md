@@ -14,6 +14,8 @@ Operace smí pouze označit existující `order_items` nebo `order_bridge_toll_i
 
 Redakční endpoint `DELETE /api/editorial/topics/:id` smí smazat pouze vybrané téma z tabulky `blog_topic_queue`. Nesmí mazat navázaný článek, překlady ani žádná obchodní data. Ostatní zápisy Redakce musí zůstat omezené na tabulky `blog_*` a redakční úložiště.
 
+Při zapnuté automatizaci smí samostatný redakční worker vytvářet AI témata, generační auditní záznamy, nepublikované články, jejich jazykové koncepty, zdroje a ověřovaná tvrzení, a to pouze v tabulkách `blog_*`. Automatizace se musí zastavit ve stavu ke kontrole a nikdy nesmí sama publikovat. Publikaci smí vyvolat pouze přihlášený uživatel.
+
 Redakční endpoint `DELETE /api/editorial/articles/:id/hero` smí odstranit pouze hlavní obrázek daného článku z bucketu `blog-hero-images` a vyprázdnit `blog_posts.hero_image_url`. Nesmí měnit ani mazat jiné soubory, článek, překlady nebo obchodní data.
 
 Při publikaci smí redakční endpoint uložit do `blog_posts.published_by` e-mail uživatele z ověřené dashboard session. Hodnota slouží pouze jako auditní údaj autora poslední publikace.

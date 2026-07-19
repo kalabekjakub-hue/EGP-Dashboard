@@ -211,6 +211,33 @@ const translationSchema = {
 
 const topicSchema = { type: "object", additionalProperties: false, required: ["topic"], properties: { topic: { type: "string" } } };
 
+async function suggestEditorialTopic() {
+  const [articles, topics, guidance] = await Promise.all([
+    supabase("blog_posts?select=slug,source_topic&order=created_at.desc&limit=100") as Promise<Array<Record<string, unknown>>>,
+    supabase("blog_topic_queue?select=topic&order=created_at.desc&limit=100") as Promise<Array<Record<string, unknown>>>,
+    editorialGuidance(),
+  ]);
+  const existing = [
+    ...articles.map(article => String(article.source_topic ?? article.slug ?? "")),
+    ...topics.map(topic => String(topic.topic ?? "")),
+  ].filter(Boolean).join("\n- ");
+  const { translationModel } = config();
+  const runId = randomUUID();
+  await supabase("blog_generation_runs", { method: "POST", body: JSON.stringify({ id: runId, run_type: "topic_suggestion", status: "running", source_locale: "cs", provider: "openai", model: translationModel }) });
+  let recordedUsage: AiTokenUsage | null = null;
+  try {
+    const generated = await openaiResponse(`Navrhni jedno konkrétní praktické SEO téma pro český článek EuroGoPass o dálničních známkách, mýtném nebo cestě autem mezi evropskými zeměmi. Téma musí odpovídat reálnému dotazu cestovatele, mít jasný informační záměr a nesmí duplikovat nic ze seznamu. Vrať téma, ne osnovu ani hotový článek.\n\nExistující a naplánovaná témata:\n- ${existing || "žádná"}${guidance ? `\n\n${guidance}` : ""}`, "eurogopass_topic", topicSchema, translationModel, false);
+    recordedUsage = aiTokenUsage(generated.raw, translationModel);
+    const topic = String(generated.data.topic ?? "").trim();
+    if (!topic) throw new Error("AI nevrátila použitelné téma");
+    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
+    return topic;
+  } catch (error) {
+    await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "failed", ...generationUsageRecord(recordedUsage), error: error instanceof Error ? error.message : "Návrh tématu selhal", finished_at: new Date().toISOString() }) }).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function listArticles() {
   const currentUsdCzk = await usdCzkRate();
   const posts = await supabase("blog_posts?select=*&order=updated_at.desc") as Array<Record<string, unknown>>;
@@ -313,7 +340,16 @@ export async function runEditorialAutomationCycle() {
   const part = (type: string) => pragueParts.find(candidate => candidate.type === type)?.value ?? "";
   const weekday = ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 } as Record<string, number>)[part("weekday")];
   if (!(settings.weekdays as number[] | undefined)?.includes(weekday) || Number(part("hour")) < Number(settings.generation_hour ?? 7)) return { action: "outside_schedule" };
-  const review = await supabase("blog_topic_queue?status=eq.review&select=id") as Array<Record<string, unknown>>;
+  const review = await supabase("blog_topic_queue?status=eq.review&select=id,post_id&order=updated_at.asc") as Array<Record<string, unknown>>;
+  for (const item of review) {
+    if (!item.post_id) continue;
+    const drafts = await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(String(item.post_id))}&select=locale`) as Array<Record<string, unknown>>;
+    const published = await supabase(`blog_post_translations?post_id=eq.${encodeURIComponent(String(item.post_id))}&select=locale`) as Array<Record<string, unknown>>;
+    if (new Set([...drafts, ...published].map(row => String(row.locale))).size < editorialLocales.length) {
+      const result = await generateTranslations(String(item.post_id), "cs");
+      return { action: "completed_translations", postId: item.post_id, locales: result.locales };
+    }
+  }
   const limit = Number(settings.max_pending_reviews ?? 10);
   if (limit > 0 && review.length >= limit) return { action: "pending_limit", count: review.length };
   const pragueDate = `${part("year")}-${part("month")}-${part("day")}`;
@@ -321,10 +357,15 @@ export async function runEditorialAutomationCycle() {
   const recentRuns = await supabase(`blog_generation_runs?run_type=eq.article&status=eq.completed&started_at=gte.${encodeURIComponent(lookback)}&select=id,started_at`) as Array<Record<string, unknown>>;
   const runs = recentRuns.filter(run => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Prague", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(String(run.started_at))) === pragueDate);
   if (runs.length >= Number(settings.drafts_per_day ?? 2)) return { action: "daily_limit", count: runs.length };
-  const topics = await supabase("blog_topic_queue?status=eq.queued&select=*&order=priority.desc,created_at.asc&limit=1") as Array<Record<string, unknown>>;
-  if (!topics[0]) return { action: "empty_queue" };
+  let topics = await supabase("blog_topic_queue?status=eq.queued&select=*&order=priority.desc,created_at.asc&limit=1") as Array<Record<string, unknown>>;
+  let suggestedTopic: string | undefined;
+  if (!topics[0]) {
+    suggestedTopic = await suggestEditorialTopic();
+    topics = await supabase("blog_topic_queue", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ topic: suggestedTopic, target_characters: 2200, source: "ai", status: "queued" }) }) as Array<Record<string, unknown>>;
+  }
   const result = await generateArticle(String(topics[0].id));
-  return { action: "generated", postId: result.post.id };
+  const translations = await generateTranslations(String(result.post.id), "cs");
+  return { action: "generated", postId: result.post.id, suggestedTopic, translatedLocales: translations.locales };
 }
 
 async function generateTranslations(postId: string, sourceLocale: string) {
@@ -386,6 +427,7 @@ async function publishArticle(postId: string, publishedBy: string) {
   }
   await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}`, { method: "PATCH", body: JSON.stringify({ status: "published", published_at: new Date().toISOString(), published_by: publishedBy, updated_at: new Date().toISOString() }) });
   if (drafts.length) await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}`, { method: "DELETE" });
+  await supabase(`blog_topic_queue?post_id=eq.${encodeURIComponent(postId)}&status=eq.review`, { method: "PATCH", body: JSON.stringify({ status: "completed", updated_at: new Date().toISOString() }) });
   return { published: true, locales: drafts.map(row => row.locale) };
 }
 
@@ -480,12 +522,7 @@ export function editorialApi(actorEmail: (req: import("node:http").IncomingMessa
             return json(res, 201, { topics: rows });
           }
           if (method === "POST" && route === "/topics/suggest") {
-            const articles = await listArticles() as Array<Record<string, unknown>>;
-            const existing = articles.slice(0, 80).map(article => String(article.source_topic ?? article.slug)).join("\n- ");
-            const { translationModel } = config();
-            const guidance = await editorialGuidance();
-            const generated = await openaiResponse(`Navrhni jedno konkrétní praktické SEO téma pro krátký článek EuroGoPass o dálničních známkách, mýtném nebo cestě autem mezi evropskými zeměmi. Má odpovídat reálnému dotazu cestovatele, nebýt duplicitní a mít jasný informační záměr. Vrať jen téma, ne hotový titulek. Existující témata:\n- ${existing}${guidance ? `\n\n${guidance}` : ""}`, "eurogopass_topic", topicSchema, translationModel, false);
-            return json(res, 200, { topic: generated.data.topic });
+            return json(res, 200, { topic: await suggestEditorialTopic() });
           }
           const deleteTopicMatch = route.match(/^\/topics\/([^/]+)$/);
           if (method === "DELETE" && deleteTopicMatch) {
