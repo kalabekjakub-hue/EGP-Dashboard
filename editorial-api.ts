@@ -344,6 +344,66 @@ async function generateArticle(topicId: string) {
   }
 }
 
+type ArticleGenerationResult = Awaited<ReturnType<typeof generateArticle>>;
+type ArticleGenerationJob = {
+  topicId: string;
+  promise: Promise<ArticleGenerationResult>;
+  resolve: (result: ArticleGenerationResult) => void;
+  reject: (error: unknown) => void;
+};
+
+const articleGenerationQueue: ArticleGenerationJob[] = [];
+const articleGenerationJobs = new Map<string, ArticleGenerationJob>();
+let articleGenerationActive = false;
+let articleGenerationScheduling: Promise<void> = Promise.resolve();
+
+async function drainArticleGenerationQueue() {
+  if (articleGenerationActive) return;
+  articleGenerationActive = true;
+  try {
+    while (articleGenerationQueue.length) {
+      const job = articleGenerationQueue.shift()!;
+      try { job.resolve(await generateArticle(job.topicId)); }
+      catch (error) { job.reject(error); }
+      finally { articleGenerationJobs.delete(job.topicId); }
+    }
+  } finally {
+    articleGenerationActive = false;
+  }
+}
+
+async function enqueueArticleGeneration(topicId: string) {
+  const existing = articleGenerationJobs.get(topicId);
+  if (existing) {
+    const queueIndex = articleGenerationQueue.findIndex(job => job.topicId === topicId);
+    return { promise: existing.promise, position: queueIndex < 0 ? 1 : queueIndex + 1 + (articleGenerationActive ? 1 : 0), alreadyQueued: true };
+  }
+
+  let resolve!: (result: ArticleGenerationResult) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<ArticleGenerationResult>((resolvePromise, rejectPromise) => { resolve = resolvePromise; reject = rejectPromise; });
+  const job = { topicId, promise, resolve, reject };
+  articleGenerationJobs.set(topicId, job);
+  // Manual requests do not wait for completion, so always attach a rejection handler.
+  void promise.catch(() => undefined);
+  let position = 1;
+  const schedule = articleGenerationScheduling.then(async () => {
+    await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(topicId)}`, { method: "PATCH", body: JSON.stringify({ status: "scheduled", last_error: null, updated_at: new Date().toISOString() }) });
+    articleGenerationQueue.push(job);
+    position = articleGenerationQueue.length + (articleGenerationActive ? 1 : 0);
+    void drainArticleGenerationQueue();
+  });
+  articleGenerationScheduling = schedule.catch(() => undefined);
+  try {
+    await schedule;
+  } catch (error) {
+    articleGenerationJobs.delete(topicId);
+    reject(error);
+    throw error;
+  }
+  return { promise, position, alreadyQueued: false };
+}
+
 export async function runEditorialAutomationCycle() {
   const rows = await supabase("blog_automation_settings?select=*&limit=1") as Array<Record<string, unknown>>;
   const settings = rows[0];
@@ -375,7 +435,8 @@ export async function runEditorialAutomationCycle() {
     suggestedTopic = await suggestEditorialTopic();
     topics = await supabase("blog_topic_queue", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ topic: suggestedTopic, target_characters: 2200, source: "ai", status: "queued" }) }) as Array<Record<string, unknown>>;
   }
-  const result = await generateArticle(String(topics[0].id));
+  const queued = await enqueueArticleGeneration(String(topics[0].id));
+  const result = await queued.promise;
   const translations = await generateTranslations(String(result.post.id), "cs");
   return { action: "generated", postId: result.post.id, suggestedTopic, translatedLocales: translations.locales };
 }
@@ -553,7 +614,10 @@ export function editorialApi(actorEmail: (req: import("node:http").IncomingMessa
             return json(res, 200, { deleted: true });
           }
           const generateMatch = route.match(/^\/topics\/([^/]+)\/generate$/);
-          if (method === "POST" && generateMatch) return json(res, 200, await generateArticle(decodeURIComponent(generateMatch[1])));
+          if (method === "POST" && generateMatch) {
+            const queued = await enqueueArticleGeneration(decodeURIComponent(generateMatch[1]));
+            return json(res, 202, { queued: true, position: queued.position, alreadyQueued: queued.alreadyQueued });
+          }
           const saveMatch = route.match(/^\/articles\/([^/]+)\/locales\/([^/]+)$/);
           if (method === "PUT" && saveMatch) return json(res, 200, { draft: await saveDraft(decodeURIComponent(saveMatch[1]), decodeURIComponent(saveMatch[2]), await readBody(req)) });
           const translateMatch = route.match(/^\/articles\/([^/]+)\/translate$/);
