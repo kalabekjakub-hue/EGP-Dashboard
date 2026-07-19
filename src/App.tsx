@@ -627,7 +627,7 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
         </div>
         <time>{now.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" })} · {now.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" })}</time>
         <div className="settings-wrap" ref={settingsRef}>
-          <button className="icon-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Otevřít nabídku"><Plus size={20} /></button>
+          <button className="icon-button plus-menu-button" onClick={() => setMenuOpen(!menuOpen)} aria-label="Otevřít nabídku"><Plus size={20} /></button>
           {menuOpen && (
             <div className="settings-menu">
               <button onClick={() => { setSettingsOpen(!settingsOpen); setLinksOpen(false); }}><Settings size={16} /> Nastavení <ChevronLeft size={16} /></button>
@@ -1580,6 +1580,6 @@ export default function App() {
   };
 
   if (auth === "loading") return <main className="auth-screen"><Logo /><span className="auth-loading">Ověřuji přihlášení…</span></main>;
-  if (auth === "anonymous") return <main className="auth-screen"><section className="auth-card surface"><Logo /><form onSubmit={event => void login(event)}><label><span>E-mail</span><input type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required autoFocus /></label><label><span>Heslo</span><input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>{loginState === "error" && <div className="auth-error">Nesprávný e-mail nebo heslo.</div>}<button type="submit" disabled={loginState === "loading"}>{loginState === "loading" ? "Přihlašuji…" : "Přihlásit se"}</button></form></section></main>;
+  if (auth === "anonymous") return <main className="auth-screen"><section className="auth-card surface"><Logo /><form onSubmit={event => void login(event)}><label><span>E-mail</span><input type="email" autoComplete="username" value={email} onChange={event => setEmail(event.target.value)} required autoFocus /></label><label><span>Heslo</span><input type="password" autoComplete="current-password" minLength={12} maxLength={128} value={password} onChange={event => setPassword(event.target.value)} required /></label>{loginState === "error" && <div className="auth-error">Nesprávný e-mail nebo heslo.</div>}<button type="submit" disabled={loginState === "loading"}>{loginState === "loading" ? "Přihlašuji…" : "Přihlásit se"}</button></form></section></main>;
   return <DashboardApp onLogout={() => void logout()} />;
 }

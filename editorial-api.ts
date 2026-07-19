@@ -17,9 +17,16 @@ function json(res: import("node:http").ServerResponse, status: number, payload: 
 
 async function readBody(req: import("node:http").IncomingMessage) {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 256 * 1024) throw Object.assign(new Error("Požadavek je příliš velký"), { status: 413 });
+    chunks.push(buffer);
+  }
   if (!chunks.length) return {} as Record<string, unknown>;
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; }
+  catch { throw Object.assign(new Error("Neplatný JSON"), { status: 400 }); }
 }
 
 function config() {
@@ -271,12 +278,17 @@ async function listArticles() {
 }
 
 async function saveDraft(postId: string, locale: string, body: Record<string, unknown>) {
+  if (!editorialLocales.includes(locale)) throw Object.assign(new Error("Nepodporovaný jazyk"), { status: 400 });
+  const title = String(body.title ?? "");
+  const excerpt = String(body.excerpt ?? "");
+  const bodyMd = String(body.body_md ?? "");
+  if (title.length > 300 || excerpt.length > 2_000 || bodyMd.length > 200_000) throw Object.assign(new Error("Text překračuje povolenou délku"), { status: 400 });
   const current = (await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}&locale=eq.${encodeURIComponent(locale)}&select=*`) as Array<Record<string, unknown>>)[0];
   const isVersion = body.saveMode === "version";
   const localRevision = body.resetLocalRevision === true ? 0 : Number(current?.local_revision ?? body.local_revision ?? 0) + (isVersion ? 1 : 0);
   const record = {
     post_id: postId, locale,
-    title: String(body.title ?? ""), excerpt: String(body.excerpt ?? ""), body_md: String(body.body_md ?? ""),
+    title, excerpt, body_md: bodyMd,
     slug: slugify(String(body.slug ?? body.title ?? "")), seo_title: String(body.seo_title ?? ""), seo_description: String(body.seo_description ?? ""), hero_image_alt: String(body.hero_image_alt ?? ""),
     common_revision: Number(body.common_revision ?? 1), local_revision: localRevision,
     source_locale: String(body.source_locale ?? locale), manually_edited: true,
@@ -431,15 +443,26 @@ async function publishArticle(postId: string, publishedBy: string) {
   return { published: true, locales: drafts.map(row => row.locale) };
 }
 
-async function uploadHero(postId: string, filename: string, contentType: string, req: import("node:http").IncomingMessage) {
+async function uploadHero(postId: string, contentType: string, req: import("node:http").IncomingMessage) {
   const { supabaseUrl, supabaseKey } = config();
   if (!supabaseUrl || !supabaseKey) throw new Error("Supabase konfigurace není dostupná");
-  if (!contentType.startsWith("image/")) throw new Error("Vybraný soubor není obrázek");
+  const normalizedContentType = contentType.toLowerCase().split(";", 1)[0].trim();
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+  if (!allowedTypes.has(normalizedContentType)) throw Object.assign(new Error("Nepodporovaný typ obrázku"), { status: 400 });
   const chunks: Buffer[] = []; let size = 0;
   for await (const chunk of req) { const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk); size += buffer.length; if (size > 10 * 1024 * 1024) throw new Error("Obrázek může mít maximálně 10 MB"); chunks.push(buffer); }
-  const extension = filename.toLowerCase().match(/\.(jpe?g|png|webp|avif)$/)?.[1] ?? "jpg";
+  const body = Buffer.concat(chunks);
+  const signatures = [
+    normalizedContentType === "image/jpeg" && body.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])),
+    normalizedContentType === "image/png" && body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    normalizedContentType === "image/webp" && body.subarray(0, 4).toString("ascii") === "RIFF" && body.subarray(8, 12).toString("ascii") === "WEBP",
+    normalizedContentType === "image/avif" && body.subarray(4, 12).toString("ascii").includes("ftyp"),
+  ];
+  if (!body.length || !signatures.some(Boolean)) throw Object.assign(new Error("Obsah souboru neodpovídá typu obrázku"), { status: 400 });
+  const extensionByType: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/avif": "avif" };
+  const extension = extensionByType[normalizedContentType];
   const path = `${postId}/hero-${Date.now()}.${extension}`;
-  const response = await fetch(`${supabaseUrl}/storage/v1/object/blog-hero-images/${path}`, { method: "POST", headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, "Content-Type": contentType, "x-upsert": "true" }, body: Buffer.concat(chunks) });
+  const response = await fetch(`${supabaseUrl}/storage/v1/object/blog-hero-images/${path}`, { method: "POST", headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}`, "Content-Type": normalizedContentType, "x-upsert": "true" }, body });
   if (!response.ok) throw new Error(`Nahrání obrázku selhalo: ${await response.text()}`);
   const publicUrl = `${supabaseUrl}/storage/v1/object/public/blog-hero-images/${path}`;
   await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}`, { method: "PATCH", body: JSON.stringify({ hero_image_url: publicUrl, updated_at: new Date().toISOString() }) });
@@ -538,14 +561,15 @@ export function editorialApi(actorEmail: (req: import("node:http").IncomingMessa
           const publishMatch = route.match(/^\/articles\/([^/]+)\/publish$/);
           if (method === "POST" && publishMatch) return json(res, 200, await publishArticle(decodeURIComponent(publishMatch[1]), actorEmail(req)));
           const heroMatch = route.match(/^\/articles\/([^/]+)\/hero$/);
-          if (method === "PUT" && heroMatch) return json(res, 200, await uploadHero(decodeURIComponent(heroMatch[1]), url.searchParams.get("filename") ?? "hero.jpg", req.headers["content-type"] ?? "application/octet-stream", req));
+          if (method === "PUT" && heroMatch) return json(res, 200, await uploadHero(decodeURIComponent(heroMatch[1]), req.headers["content-type"] ?? "application/octet-stream", req));
           if (method === "DELETE" && heroMatch) return json(res, 200, await removeHero(decodeURIComponent(heroMatch[1])));
           const deleteMatch = route.match(/^\/articles\/([^/]+)$/);
           if (method === "DELETE" && deleteMatch) { await supabase(`blog_posts?id=eq.${encodeURIComponent(deleteMatch[1])}`, { method: "DELETE" }); return json(res, 200, { deleted: true }); }
           json(res, 404, { error: "Editorial route not found" });
         } catch (error) {
           const status = error instanceof Error && "status" in error ? Number((error as Error & { status?: number }).status) : 500;
-          json(res, Number.isInteger(status) && status >= 400 && status < 600 ? status : 500, { error: error instanceof Error ? error.message : "Redakční operace selhala" });
+          const safeStatus = Number.isInteger(status) && status >= 400 && status < 600 ? status : 500;
+          json(res, safeStatus, { error: safeStatus >= 500 ? "Redakční operace selhala" : error instanceof Error ? error.message : "Neplatný požadavek" });
         }
       });
     },

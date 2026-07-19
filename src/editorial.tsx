@@ -32,11 +32,19 @@ function formatAiCost(value: number) {
 }
 
 function escapeHtml(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function safeLink(value: string) {
+  const normalized = value.trim();
+  return /^(https?:\/\/|mailto:|\/|#)/i.test(normalized) && !/^\/\//.test(normalized) ? normalized : null;
 }
 
 function markdownToHtml(markdown: string) {
-  const inline = (value: string) => escapeHtml(value).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  const inline = (value: string) => escapeHtml(value).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, href: string) => {
+    const safe = safeLink(href);
+    return safe ? `<a href="${safe}" rel="noopener noreferrer">${label}</a>` : label;
+  });
   const lines = markdown.split(/\r?\n/); const html: string[] = []; let list = false;
   const closeList = () => { if (list) { html.push("</ul>"); list = false; } };
   for (const line of lines) {

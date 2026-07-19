@@ -1,15 +1,95 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { randomUUID } from "node:crypto";
+import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
 import { editorialApi } from "./editorial-api";
 
 const execFileAsync = promisify(execFile);
 const authSessions = new Map<string, { email: string; expiresAt: number }>();
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+const maxJsonBodyBytes = 256 * 1024;
+const dashboardCredentialsPath = process.env.EGP_AUTH_FILE ?? (process.env.NODE_ENV === "production" ? "/app/auth-data/users.json" : "runtime/auth/users.json");
+let credentialWriteQueue = Promise.resolve();
+
+type DashboardCredential = { salt: string; hash: string; createdAt: string };
+const infoCredential: DashboardCredential = {
+  salt: "xQ1rQbngUCPX5crQ3I/2XA==",
+  hash: "xOZ/RZebTmUQOWAa+hlHkZ1s2C1OfzqzS92W5prk0FuWYNLG4nHTGQhKi8Xyy/PSml75uPXOsRKZ39gWtWudJA==",
+  createdAt: "2026-07-19T00:00:00.000Z",
+};
+
+function scrypt(password: string, salt: Buffer) {
+  return new Promise<Buffer>((resolve, reject) => scryptCallback(password, salt, 64, (error, key) => error ? reject(error) : resolve(key)));
+}
+
+async function readDashboardCredentials(): Promise<Record<string, DashboardCredential>> {
+  try { return JSON.parse(await readFile(dashboardCredentialsPath, "utf8")) as Record<string, DashboardCredential>; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw error;
+  }
+}
+
+async function authenticateOrCreateDashboardUser(email: string, password: string) {
+  let authenticated = false;
+  credentialWriteQueue = credentialWriteQueue.catch(() => undefined).then(async () => {
+    const credentials = await readDashboardCredentials();
+    const existing = email === "info@eurogopass.com" ? infoCredential : credentials[email];
+    if (existing) {
+      const actual = await scrypt(password, Buffer.from(existing.salt, "base64"));
+      const expected = Buffer.from(existing.hash, "base64");
+      authenticated = actual.length === expected.length && timingSafeEqual(actual, expected);
+      return;
+    }
+    const salt = randomBytes(16);
+    const hash = await scrypt(password, salt);
+    credentials[email] = { salt: salt.toString("base64"), hash: hash.toString("base64"), createdAt: new Date().toISOString() };
+    const separator = Math.max(dashboardCredentialsPath.lastIndexOf("/"), dashboardCredentialsPath.lastIndexOf("\\"));
+    const directory = separator >= 0 ? dashboardCredentialsPath.slice(0, separator) : ".";
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const temporary = `${dashboardCredentialsPath}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(credentials), { encoding: "utf8", mode: 0o600 });
+    await rename(temporary, dashboardCredentialsPath);
+    authenticated = true;
+  });
+  await credentialWriteQueue;
+  return authenticated;
+}
+
+async function readJsonBody<T>(req: import("node:http").IncomingMessage, maxBytes = maxJsonBodyBytes): Promise<T> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBytes) throw Object.assign(new Error("Požadavek je příliš velký"), { status: 413 });
+    chunks.push(buffer);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T; }
+  catch { throw Object.assign(new Error("Neplatný JSON"), { status: 400 }); }
+}
+
+function requestIp(req: import("node:http").IncomingMessage) {
+  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",").map(value => value.trim()).filter(Boolean);
+  return forwarded.at(-1) ?? req.socket.remoteAddress ?? "unknown";
+}
+
+function sameOrigin(req: import("node:http").IncomingMessage) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  const configured = process.env.EGP_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === "production" ? "https://admin.eurogopass.com" : "");
+  if (configured) {
+    try { return new URL(origin).origin === new URL(configured).origin; } catch { return false; }
+  }
+  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0].trim();
+  const proto = String(req.headers["x-forwarded-proto"] ?? (process.env.NODE_ENV === "production" ? "https" : "http")).split(",")[0].trim();
+  try { return new URL(origin).origin === `${proto}://${host}`; } catch { return false; }
+}
 
 function dashboardWritePolicy() {
   return {
@@ -22,6 +102,12 @@ function dashboardWritePolicy() {
           return;
         }
         const route = (req.url ?? "/").split("?")[0];
+        if (!sameOrigin(req)) {
+          res.statusCode = 403;
+          res.setHeader("Content-Type", "application/json; charset=utf-8");
+          res.end(JSON.stringify({ error: "Požadavek z cizího originu byl odmítnut" }));
+          return;
+        }
         if ((method === "POST" && route === "/orders/fulfill-item") || route.startsWith("/editorial/")) {
           next();
           return;
@@ -37,6 +123,19 @@ function dashboardWritePolicy() {
 
 function cookieValue(header: string | undefined, name: string) {
   return header?.split(";").map(part => part.trim().split("=")).find(([key]) => key === name)?.slice(1).join("=");
+}
+
+function isAdminEmail(email: string | undefined) {
+  if (!email) return false;
+  const { adminEmails } = loadServerConfig();
+  return adminEmails.length > 0 && adminEmails.includes(email.toLowerCase());
+}
+
+function createDashboardSession(res: import("node:http").ServerResponse, email: string) {
+  const sid = randomBytes(32).toString("base64url");
+  authSessions.set(sid, { email, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `egp_admin_session=${sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure}`);
 }
 
 function editorialActorEmail(req: import("node:http").IncomingMessage) {
@@ -55,7 +154,7 @@ function authApi() {
         if (route === "/session" && req.method === "GET") {
           const sid = cookieValue(req.headers.cookie, "egp_admin_session");
           const session = sid ? authSessions.get(sid) : undefined;
-          if (!session || session.expiresAt <= Date.now()) {
+          if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) {
             if (sid) authSessions.delete(sid);
             res.statusCode = 401;
             res.end(JSON.stringify({ authenticated: false }));
@@ -67,28 +166,37 @@ function authApi() {
         }
         if (route === "/login" && req.method === "POST") {
           try {
-            const chunks: Buffer[] = [];
-            for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { email?: string; password?: string };
-            if (!body.email || !body.password) throw new Error("Vyplň e-mail a heslo");
-            const { url, key } = loadWorkerEnv();
-            if (!url || !key) throw new Error("Auth konfigurace není dostupná");
-            const upstream = await fetch(`${url}/auth/v1/token?grant_type=password`, { method: "POST", headers: { apikey: key, "Content-Type": "application/json" }, body: JSON.stringify({ email: body.email, password: body.password }) });
-            if (!upstream.ok) {
+            if (!sameOrigin(req)) throw Object.assign(new Error("Požadavek z cizího originu byl odmítnut"), { status: 403 });
+            const attemptKey = requestIp(req);
+            const now = Date.now();
+            if (loginAttempts.size > 10_000) for (const [key, value] of loginAttempts) if (value.resetAt <= now) loginAttempts.delete(key);
+            const attempt = loginAttempts.get(attemptKey);
+            if (attempt && attempt.resetAt > now && attempt.count >= 5) throw Object.assign(new Error("Příliš mnoho pokusů. Zkus to za 15 minut."), { status: 429 });
+            if (!attempt || attempt.resetAt <= now) loginAttempts.set(attemptKey, { count: 1, resetAt: now + 15 * 60_000 });
+            else attempt.count += 1;
+            const body = await readJsonBody<{ email?: string; password?: string }>(req, 16 * 1024);
+            const email = String(body.email ?? "").trim().toLowerCase();
+            const password = String(body.password ?? "");
+            if (!email || password.length < 12 || password.length > 128) throw Object.assign(new Error("E-mail nebo heslo není platné"), { status: 400 });
+            if (!isAdminEmail(email)) {
               res.statusCode = 401;
               res.end(JSON.stringify({ authenticated: false, error: "Nesprávný e-mail nebo heslo" }));
               return;
             }
-            const payload = await upstream.json() as { user?: { email?: string } };
-            const sid = randomUUID();
-            authSessions.set(sid, { email: payload.user?.email ?? body.email, expiresAt: Date.now() + 12 * 60 * 60 * 1000 });
-            const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-            res.setHeader("Set-Cookie", `egp_admin_session=${sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure}`);
+            if (!await authenticateOrCreateDashboardUser(email, password)) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ authenticated: false, error: "Nesprávný e-mail nebo heslo" }));
+              return;
+            }
+            loginAttempts.delete(attemptKey);
+            createDashboardSession(res, email);
             res.statusCode = 200;
-            res.end(JSON.stringify({ authenticated: true, email: payload.user?.email ?? body.email }));
+            res.end(JSON.stringify({ authenticated: true, email }));
           } catch (error) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ authenticated: false, error: error instanceof Error ? error.message : "Přihlášení selhalo" }));
+            const status = error instanceof Error && "status" in error ? Number((error as Error & { status?: number }).status) : 500;
+            res.statusCode = status;
+            if (status === 429) res.setHeader("Retry-After", "900");
+            res.end(JSON.stringify({ authenticated: false, error: status >= 500 ? "Přihlášení selhalo" : error instanceof Error ? error.message : "Přihlášení selhalo" }));
           }
           return;
         }
@@ -107,7 +215,7 @@ function authApi() {
         if ((req.url ?? "").startsWith("/auth/")) { next(); return; }
         const sid = cookieValue(req.headers.cookie, "egp_admin_session");
         const session = sid ? authSessions.get(sid) : undefined;
-        if (!session || session.expiresAt <= Date.now()) {
+        if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) {
           if (sid) authSessions.delete(sid);
           res.statusCode = 401;
           res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -370,45 +478,26 @@ function manualFulfillmentApi() {
         try {
           const sid = cookieValue(req.headers.cookie, "egp_admin_session");
           const session = sid ? authSessions.get(sid) : undefined;
-          if (!session || session.expiresAt <= Date.now()) throw new Error("Přihlášení vypršelo");
-          const chunks: Buffer[] = [];
-          for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { orderId?: string; itemId?: string; source?: string };
+          if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) throw new Error("Přihlášení vypršelo");
+          const body = await readJsonBody<{ orderId?: string; itemId?: string; source?: string }>(req, 16 * 1024);
           const allowedSources = new Set(["order_items", "order_bridge_toll_items"]);
           if (!body.orderId || !body.itemId || !body.source || !allowedSources.has(body.source)) throw new Error("Neplatná položka objednávky");
           const { url, key } = loadWorkerEnv();
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
-          const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
-          const beforeResponse = await fetch(`${url}/rest/v1/${body.source}?select=id,status,country_code&id=eq.${encodeURIComponent(body.itemId)}&order_id=eq.${encodeURIComponent(body.orderId)}&limit=1`, { headers });
-          if (!beforeResponse.ok) throw new Error(`Supabase lookup ${beforeResponse.status}`);
-          const before = await beforeResponse.json() as Array<{ id: string; status: string; country_code?: string }>;
-          if (before.length !== 1) throw new Error("Položka nebyla nalezena nebo nebyla jednoznačná");
-          const fulfilledAt = new Date().toISOString();
-          const target = `${url}/rest/v1/${body.source}?id=eq.${encodeURIComponent(body.itemId)}&order_id=eq.${encodeURIComponent(body.orderId)}`;
-          const upstream = await fetch(target, {
-            method: "PATCH",
-            headers: { ...headers, Prefer: "return=representation" },
-            body: JSON.stringify({ status: "fulfilled", fulfilled_at: fulfilledAt, failed_at: null, last_error: null }),
-          });
-          if (!upstream.ok) throw new Error(`Supabase API ${upstream.status}`);
-          const updated = await upstream.json() as Array<{ id: string; fulfilled_at: string }>;
-          if (updated.length !== 1) throw new Error("Položka nebyla nalezena nebo nebyla jednoznačná");
-          const auditResponse = await fetch(`${url}/rest/v1/manual_fulfillment_audit`, {
+          const upstream = await fetch(`${url}/rest/v1/rpc/manual_fulfill_order_item`, {
             method: "POST",
-            headers: { ...headers, Prefer: "return=minimal" },
+            headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
             body: JSON.stringify({
-              order_id: body.orderId,
-              item_id: body.itemId,
-              item_source: body.source,
-              country_code: before[0].country_code ?? null,
-              actor_email: session.email,
-              previous_status: before[0].status,
-              fulfilled_at: updated[0].fulfilled_at,
+              p_order_id: body.orderId,
+              p_item_id: body.itemId,
+              p_item_source: body.source,
+              p_actor_email: session.email,
             }),
           });
-          if (!auditResponse.ok) throw new Error(`Audit zápis ${auditResponse.status}`);
+          if (!upstream.ok) throw new Error(`Supabase fulfillment ${upstream.status}`);
+          const result = await upstream.json() as { fulfilled_at?: string };
           res.statusCode = 200;
-          res.end(JSON.stringify({ ok: true, fulfilledAt: updated[0].fulfilled_at }));
+          res.end(JSON.stringify({ ok: true, fulfilledAt: result.fulfilled_at }));
         } catch (error) {
           res.statusCode = 400;
           res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Ruční dokončení selhalo" }));

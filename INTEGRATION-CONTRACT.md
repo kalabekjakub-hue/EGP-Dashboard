@@ -12,6 +12,10 @@ POST /api/orders/fulfill-item
 
 Operace smí pouze označit existující `order_items` nebo `order_bridge_toll_items` jako `fulfilled` a doplnit `fulfilled_at`. Ostatní ne-GET požadavky nad obchodními daty server odmítne stavem `405`.
 
+Změna položky a zápis do `manual_fulfillment_audit` musí proběhnout atomicky v jediné databázové transakci prostřednictvím `manual_fulfill_order_item`. Funkce smí měnit výhradně `status` a `fulfilled_at`; při selhání auditu se musí vrátit zpět i změna položky. Spuštění RPC je povoleno pouze serverové roli dashboardu a až po ověření administrátorské session.
+
+Přístup k dashboardu je omezen explicitním serverovým allowlistem `EGP_ADMIN_EMAILS`. Samotná existence účtu v Supabase Auth neopravňuje k přístupu do administrace.
+
 Redakční endpoint `DELETE /api/editorial/topics/:id` smí smazat pouze vybrané téma z tabulky `blog_topic_queue`. Nesmí mazat navázaný článek, překlady ani žádná obchodní data. Ostatní zápisy Redakce musí zůstat omezené na tabulky `blog_*` a redakční úložiště.
 
 Při zapnuté automatizaci smí samostatný redakční worker vytvářet AI témata, generační auditní záznamy, nepublikované články, jejich jazykové koncepty, zdroje a ověřovaná tvrzení, a to pouze v tabulkách `blog_*`. Automatizace se musí zastavit ve stavu ke kontrole a nikdy nesmí sama publikovat. Publikaci smí vyvolat pouze přihlášený uživatel.
@@ -23,6 +27,10 @@ Při publikaci smí redakční endpoint uložit do `blog_posts.published_by` e-m
 Endpointy `GET|POST /api/editorial/guides` a `PUT|DELETE /api/editorial/guides/:id` smějí číst a měnit pouze redakční Markdown podklady v `blog_editorial_guides`. Jeden dokument smí mít nejvýše 20 000 znaků, název musí končit `.md` a aktivní obsah se smí připojit pouze k promptům Redakce. Tyto endpointy nesmí zapisovat do obchodních tabulek ani jiných úložišť.
 
 `POST /api/auth/login` a `POST /api/auth/logout` mění pouze přihlašovací session dashboardu, nikoliv obchodní data v Supabase.
+
+Při prvním úspěšném `POST /api/auth/login` pro e-mail z explicitního dashboard allowlistu smí server vytvořit lokální přihlašovací záznam v odděleném persistentním auth úložišti. Ukládá se pouze normalizovaný e-mail, náhodná sůl, `scrypt` hash hesla a čas vytvoření; heslo v otevřené podobě se nesmí uložit. Další přihlášení musí heslo ověřit časově bezpečným porovnáním. Tato operace nesmí vytvářet Supabase Auth účet ani měnit obchodní či redakční data.
+
+Všechny e-maily v dashboard allowlistu mají totožná dashboard oprávnění. Přednastavené heslo účtu `info@eurogopass.com` smí být v aplikaci uloženo pouze jako osolený `scrypt` hash, nikdy v otevřené podobě.
 
 ## Pravidla pro další integrace
 

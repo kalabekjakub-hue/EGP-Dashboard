@@ -15,5 +15,6 @@ COPY --from=build /app/server.ts /app/server-config.ts /app/vite.config.ts /app/
 COPY --from=build /app/src ./src
 COPY --from=build /app/config ./config
 COPY --from=build /app/tsconfig*.json ./
+RUN mkdir -p /app/auth-data && chown -R node:node /app/auth-data
 EXPOSE 3100
 CMD ["npm", "start"]

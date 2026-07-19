@@ -4,6 +4,14 @@ services:
     container_name: egp-admin-dashboard
     restart: unless-stopped
     network_mode: host
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     env_file:
       - secrets/production.env
     environment:
@@ -15,6 +23,7 @@ services:
       GMAIL_HEALTH_FILE: /app/runtime/gmail-health.json
     volumes:
       - ./runtime:/app/runtime:ro
+      - dashboard_auth:/app/auth-data
     logging:
       driver: json-file
       options:
@@ -50,6 +59,14 @@ services:
     container_name: egp-admin-editorial
     restart: unless-stopped
     network_mode: host
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     command: ["npm", "run", "editorial:worker"]
     env_file:
       - secrets/production.env
@@ -79,3 +96,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  dashboard_auth:

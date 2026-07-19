@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { loadEnv } from "vite";
 
 type Environment = Record<string, string | undefined>;
+const builtInAdminEmails = ["info@eurogopass.com", "kalabek.jakub@gmail.com", "adamskrivanek007@gmail.com"];
 
 function readEnvFile(path: string): Environment {
   if (!existsSync(path)) return {};
@@ -23,5 +24,6 @@ export function loadServerConfig(environment: Environment = loadServerEnvironmen
     supabaseServiceKey: environment.SUPABASE_SERVICE_ROLE_KEY,
     workerMonitorUrl: (environment.EGP_WORKER_MONITOR_URL ?? "http://127.0.0.1:3090").replace(/\/$/, ""),
     workerMonitorToken: environment.EGP_WORKER_MONITOR_TOKEN ?? environment.MONITOR_READ_TOKEN,
+    adminEmails: [...new Set([...builtInAdminEmails, ...(environment.EGP_ADMIN_EMAILS ?? "").split(",")].map(value => value.trim().toLowerCase()).filter(Boolean))],
   };
 }
