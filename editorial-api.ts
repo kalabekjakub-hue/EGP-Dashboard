@@ -154,7 +154,7 @@ async function listArticles() {
 async function saveDraft(postId: string, locale: string, body: Record<string, unknown>) {
   const current = (await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}&locale=eq.${encodeURIComponent(locale)}&select=*`) as Array<Record<string, unknown>>)[0];
   const isVersion = body.saveMode === "version";
-  const localRevision = Number(current?.local_revision ?? body.local_revision ?? 0) + (isVersion ? 1 : 0);
+  const localRevision = body.resetLocalRevision === true ? 0 : Number(current?.local_revision ?? body.local_revision ?? 0) + (isVersion ? 1 : 0);
   const record = {
     post_id: postId, locale,
     title: String(body.title ?? ""), excerpt: String(body.excerpt ?? ""), body_md: String(body.body_md ?? ""),
@@ -239,8 +239,17 @@ async function generateTranslations(postId: string, sourceLocale: string) {
   const sourceRow = translations.find(row => row.locale === sourceLocale);
   if (!sourceRow) throw new Error("Zdrojový jazyk nebyl nalezen");
   const source = (sourceRow.draft as Record<string, unknown> | null) ?? sourceRow;
-  const nextRevision = Math.max(...translations.map(row => Number(((row.draft as Record<string, unknown> | null) ?? row).common_revision ?? 1))) + 1;
-  const targets = editorialLocales.filter(locale => locale !== sourceLocale);
+  const currentRevision = Math.max(...translations.map(row => Number(((row.draft as Record<string, unknown> | null) ?? row).common_revision ?? 1)));
+  const sourceRevision = Number(source.common_revision ?? 1);
+  const sourceHasLocalChanges = Number(source.local_revision ?? 0) > 0;
+  const nextRevision = sourceHasLocalChanges ? currentRevision + 1 : currentRevision;
+  const targets = editorialLocales.filter(locale => {
+    if (locale === sourceLocale) return false;
+    const targetRow = translations.find(row => row.locale === locale);
+    if (!targetRow) return true;
+    const target = (targetRow.draft as Record<string, unknown> | null) ?? targetRow;
+    return sourceHasLocalChanges || Number(target.common_revision ?? 1) < Math.max(sourceRevision, currentRevision);
+  });
   const { translationModel } = config();
   for (let index = 0; index < targets.length; index += 6) {
     const locales = targets.slice(index, index + 6);
@@ -256,17 +265,17 @@ async function generateTranslations(postId: string, sourceLocale: string) {
       }) });
     }
   }
-  await saveDraft(postId, sourceLocale, { ...source, common_revision: nextRevision, local_revision: 0, source_locale: sourceLocale, saveMode: "autosave" });
-  return { commonRevision: nextRevision, locales: editorialLocales };
+  await saveDraft(postId, sourceLocale, { ...source, common_revision: nextRevision, local_revision: 0, resetLocalRevision: true, source_locale: sourceLocale, saveMode: "autosave" });
+  return { commonRevision: nextRevision, locales: targets, skippedLocales: editorialLocales.filter(locale => locale !== sourceLocale && !targets.includes(locale)) };
 }
 
-async function publishArticle(postId: string) {
+async function publishArticle(postId: string, publishedBy: string) {
   const drafts = await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}&select=*`) as Array<Record<string, unknown>>;
   for (const draft of drafts) {
     const record = { ...draft, id: undefined, save_state: undefined, created_at: undefined, updated_at: new Date().toISOString(), editorial_status: "published", last_published_at: new Date().toISOString() };
     await supabase("blog_post_translations?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(record) });
   }
-  await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}`, { method: "PATCH", body: JSON.stringify({ status: "published", published_at: new Date().toISOString(), updated_at: new Date().toISOString() }) });
+  await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}`, { method: "PATCH", body: JSON.stringify({ status: "published", published_at: new Date().toISOString(), published_by: publishedBy, updated_at: new Date().toISOString() }) });
   if (drafts.length) await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}`, { method: "DELETE" });
   return { published: true, locales: drafts.map(row => row.locale) };
 }
@@ -301,7 +310,7 @@ async function removeHero(postId: string) {
   return { deleted: true };
 }
 
-export function editorialApi() {
+export function editorialApi(actorEmail: (req: import("node:http").IncomingMessage) => string = () => "system") {
   return {
     name: "eurogopass-editorial-api",
     configureServer(server: import("vite").ViteDevServer) {
@@ -333,9 +342,9 @@ export function editorialApi() {
           }
           if (method === "POST" && route === "/topics") {
             const body = await readBody(req); const raw = Array.isArray(body.topics) ? body.topics : [body.topic];
-            const topics = raw.map(value => String(value ?? "").trim()).filter(Boolean);
+            const topics = raw.map(value => typeof value === "object" && value !== null ? { topic: String((value as Record<string, unknown>).topic ?? "").trim(), source: (value as Record<string, unknown>).source === "ai" ? "ai" : "manual" } : { topic: String(value ?? "").trim(), source: "manual" }).filter(value => value.topic);
             if (!topics.length) return json(res, 400, { error: "Zadej alespoň jedno téma" });
-            const rows = await supabase("blog_topic_queue", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(topics.map(topic => ({ topic, target_characters: Number(body.targetCharacters ?? 2200), source: "manual" }))) });
+            const rows = await supabase("blog_topic_queue", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(topics.map(value => ({ topic: value.topic, target_characters: Number(body.targetCharacters ?? 2200), source: value.source }))) });
             return json(res, 201, { topics: rows });
           }
           if (method === "POST" && route === "/topics/suggest") {
@@ -357,7 +366,7 @@ export function editorialApi() {
           const translateMatch = route.match(/^\/articles\/([^/]+)\/translate$/);
           if (method === "POST" && translateMatch) { const body = await readBody(req); return json(res, 200, await generateTranslations(decodeURIComponent(translateMatch[1]), String(body.sourceLocale ?? "cs"))); }
           const publishMatch = route.match(/^\/articles\/([^/]+)\/publish$/);
-          if (method === "POST" && publishMatch) return json(res, 200, await publishArticle(decodeURIComponent(publishMatch[1])));
+          if (method === "POST" && publishMatch) return json(res, 200, await publishArticle(decodeURIComponent(publishMatch[1]), actorEmail(req)));
           const heroMatch = route.match(/^\/articles\/([^/]+)\/hero$/);
           if (method === "PUT" && heroMatch) return json(res, 200, await uploadHero(decodeURIComponent(heroMatch[1]), url.searchParams.get("filename") ?? "hero.jpg", req.headers["content-type"] ?? "application/octet-stream", req));
           if (method === "DELETE" && heroMatch) return json(res, 200, await removeHero(decodeURIComponent(heroMatch[1])));

@@ -29,11 +29,15 @@ import { EditorialArticleEditor, EditorialHome, EditorialPreview, EditorialSetti
 
 type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article";
 
-function routeFromPath(pathname = window.location.pathname): { view: View; orderId?: string; articleId?: string } {
+function routeFromPath(pathname = window.location.pathname): { view: View; orderId?: string; articleId?: string; articleLocale?: string } {
   const path = pathname.replace(/\/+$/, "") || "/";
+  const editorialLanguage = path.match(/^\/editorial\/articles\/([^/]+)\/languages\/([a-z]{2})$/i);
+  if (editorialLanguage) return { view: "editorial-article", articleId: decodeURIComponent(editorialLanguage[1]), articleLocale: editorialLanguage[2].toLowerCase() };
+  const editorialArticlePage = path.match(/^\/editorial\/articles\/([^/]+)$/);
+  if (editorialArticlePage) return { view: "editorial-article", articleId: decodeURIComponent(editorialArticlePage[1]) };
+  if (["/editorial", "/editorial/articles", "/editorial/topics"].includes(path)) return { view: "editorial" };
   const editorialArticle = path.match(/^\/editorial\/([^/]+)$/);
   if (editorialArticle) return { view: "editorial-article", articleId: decodeURIComponent(editorialArticle[1]) };
-  if (path === "/editorial") return { view: "editorial" };
   const orderAsset = path.match(/^\/orders\/([^/]+)\/(screenshots|documents)$/);
   if (orderAsset) return { view: orderAsset[2] as "screenshots" | "documents", orderId: decodeURIComponent(orderAsset[1]) };
   const order = path.match(/^\/orders\/([^/]+)$/);
@@ -1470,6 +1474,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
   const [view, setView] = useState<View>(initialRoute.view);
   const [routeOrderId, setRouteOrderId] = useState(initialRoute.orderId ?? "");
   const [routeArticleId, setRouteArticleId] = useState(initialRoute.articleId ?? "");
+  const [routeArticleLocale, setRouteArticleLocale] = useState(initialRoute.articleLocale ?? "cs");
   const [orderData, setOrderData] = useState<Order[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order>(demoOrders[0]);
   useEffect(() => {
@@ -1479,6 +1484,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
       setView(route.view);
       setRouteOrderId(route.orderId ?? "");
       setRouteArticleId(route.articleId ?? "");
+      setRouteArticleLocale(route.articleLocale ?? "cs");
       window.scrollTo({ top: 0 });
     };
     window.addEventListener("popstate", onPopState);
@@ -1516,9 +1522,14 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
   };
   const openArticle = (articleId: string) => {
     setRouteArticleId(articleId);
-    window.history.pushState({ egp: true }, "", `/editorial/${encodeURIComponent(articleId)}`);
+    setRouteArticleLocale("cs");
+    window.history.pushState({ egp: true }, "", `/editorial/articles/${encodeURIComponent(articleId)}`);
     setView("editorial-article");
     window.scrollTo({ top: 0 });
+  };
+  const openArticleLocale = (articleId: string, locale: string) => {
+    setRouteArticleLocale(locale);
+    window.history.pushState({ egp: true }, "", `/editorial/articles/${encodeURIComponent(articleId)}/languages/${encodeURIComponent(locale)}`);
   };
   const goBack = () => {
     if (window.history.state?.egp && !window.history.state?.entry) window.history.back();
@@ -1533,7 +1544,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     setSelectedOrder(current => update(current));
     setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} back={goBack} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor articleId={routeArticleId} back={goBack} />}</>;
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} back={goBack} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
 }
 
 export default function App() {

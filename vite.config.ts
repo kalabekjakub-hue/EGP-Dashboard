@@ -39,6 +39,11 @@ function cookieValue(header: string | undefined, name: string) {
   return header?.split(";").map(part => part.trim().split("=")).find(([key]) => key === name)?.slice(1).join("=");
 }
 
+function editorialActorEmail(req: import("node:http").IncomingMessage) {
+  const sid = cookieValue(req.headers.cookie, "egp_admin_session");
+  return (sid ? authSessions.get(sid)?.email : undefined) ?? "system";
+}
+
 function authApi() {
   return {
     name: "eurogopass-auth-api",
@@ -1291,5 +1296,5 @@ export default defineConfig(({ mode }) => {
 });
 
 export function createApiPlugins(env: Record<string, string>) {
-  return [authApi(), dashboardWritePolicy(), editorialApi(), manualFulfillmentApi(), affiliateAnalyticsApi(), supabaseReadApi(), gmailIngestReadApi(), documentReadApi(), screenshotReadApi(), workerStatusApi(), workerLogProxy(), postHogReadApi(env)];
+  return [authApi(), dashboardWritePolicy(), editorialApi(editorialActorEmail), manualFulfillmentApi(), affiliateAnalyticsApi(), supabaseReadApi(), gmailIngestReadApi(), documentReadApi(), screenshotReadApi(), workerStatusApi(), workerLogProxy(), postHogReadApi(env)];
 }
