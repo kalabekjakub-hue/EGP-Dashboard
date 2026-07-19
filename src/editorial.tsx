@@ -65,6 +65,10 @@ function statusLabel(status: string) {
   return ({ draft: "Koncept", published: "Publikováno", queued: "Čeká", scheduled: "Naplánováno", generating: "Generuje se", review: "Čeká na kontrolu", completed: "Hotovo", failed: "Chyba", paused: "Pozastaveno" } as Record<string, string>)[status] ?? status;
 }
 
+function isTopicOnBoard(topic: EditorialTopic) {
+  return !topic.post_id && topic.status !== "review" && topic.status !== "completed";
+}
+
 export function EditorialPreview({ onOpen }: { onOpen: () => void }) {
   const [preview, setPreview] = useState<{ topics: number; review: number; automation: boolean } | null>(null);
   useEffect(() => {
@@ -74,7 +78,7 @@ export function EditorialPreview({ onOpen }: { onOpen: () => void }) {
         const topicsPayload = await topicsResponse.json() as { topics?: EditorialTopic[] };
         const settingsPayload = await settingsResponse.json() as { settings?: EditorialSettings | null };
         const topics = topicsPayload.topics ?? [];
-        setPreview({ topics: topics.length, review: topics.filter(topic => topic.status === "review").length, automation: settingsPayload.settings?.enabled === true });
+        setPreview({ topics: topics.filter(isTopicOnBoard).length, review: topics.filter(topic => topic.status === "review").length, automation: settingsPayload.settings?.enabled === true });
       })
       .catch(() => setPreview(null));
   }, []);
@@ -90,7 +94,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
   const [aiSuggestedTopics, setAiSuggestedTopics] = useState<string[]>([]);
   const [selectedTopic, setSelectedTopic] = useState("");
   const load = async () => {
-    try { const [articleResponse, topicResponse, settingsResponse] = await Promise.all([fetch("/api/editorial/articles"), fetch("/api/editorial/topics"), fetch("/api/editorial/settings")]); if (!articleResponse.ok || !topicResponse.ok) throw new Error(); const articlePayload = await articleResponse.json() as { articles: EditorialArticle[] }; const topicPayload = await topicResponse.json() as { topics: EditorialTopic[]; setupRequired?: boolean }; const settingsPayload = settingsResponse.ok ? await settingsResponse.json() as { settings?: EditorialSettings | null } : null; setArticles(articlePayload.articles); setTopics(topicPayload.topics); if (settingsPayload?.settings) setAutomation({ enabled: settingsPayload.settings.enabled, generation_hour: settingsPayload.settings.generation_hour }); setMessage(topicPayload.setupRequired ? "Pro tabuli témat je potřeba aplikovat připravenou Supabase migraci." : ""); setState("ready"); } catch { setState("error"); }
+    try { const [articleResponse, topicResponse, settingsResponse] = await Promise.all([fetch("/api/editorial/articles"), fetch("/api/editorial/topics"), fetch("/api/editorial/settings")]); if (!articleResponse.ok || !topicResponse.ok) throw new Error(); const articlePayload = await articleResponse.json() as { articles: EditorialArticle[] }; const topicPayload = await topicResponse.json() as { topics: EditorialTopic[]; setupRequired?: boolean }; const settingsPayload = settingsResponse.ok ? await settingsResponse.json() as { settings?: EditorialSettings | null } : null; setArticles(articlePayload.articles); setTopics(topicPayload.topics.filter(isTopicOnBoard)); if (settingsPayload?.settings) setAutomation({ enabled: settingsPayload.settings.enabled, generation_hour: settingsPayload.settings.generation_hour }); setMessage(topicPayload.setupRequired ? "Pro tabuli témat je potřeba aplikovat připravenou Supabase migraci." : ""); setState("ready"); } catch { setState("error"); }
   };
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, []);
   const addTopics = async (event: FormEvent) => {
@@ -101,7 +105,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
   };
   const generate = async (topic: EditorialTopic) => {
     setGenerating(topic.id); setMessage("");
-    try { const response = await fetch(`/api/editorial/topics/${topic.id}/generate`, { method: "POST" }); const payload = await response.json() as { post?: { id: string }; error?: string }; if (!response.ok) throw new Error(payload.error); if (payload.post?.id) openArticle(payload.post.id); else await load(); }
+    try { const response = await fetch(`/api/editorial/topics/${topic.id}/generate`, { method: "POST" }); const payload = await response.json() as { post?: { id: string }; error?: string }; if (!response.ok) throw new Error(payload.error); if (payload.post?.id) { setTopics(current => current.filter(item => item.id !== topic.id)); openArticle(payload.post.id); } else await load(); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Generování selhalo"); await load(); }
     finally { setGenerating(""); }
   };
