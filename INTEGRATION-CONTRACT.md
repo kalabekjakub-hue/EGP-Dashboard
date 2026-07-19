@@ -18,6 +18,8 @@ Redakční endpoint `DELETE /api/editorial/articles/:id/hero` smí odstranit pou
 
 Při publikaci smí redakční endpoint uložit do `blog_posts.published_by` e-mail uživatele z ověřené dashboard session. Hodnota slouží pouze jako auditní údaj autora poslední publikace.
 
+Endpointy `GET|POST /api/editorial/guides` a `PUT|DELETE /api/editorial/guides/:id` smějí číst a měnit pouze redakční Markdown podklady v `blog_editorial_guides`. Jeden dokument smí mít nejvýše 20 000 znaků, název musí končit `.md` a aktivní obsah se smí připojit pouze k promptům Redakce. Tyto endpointy nesmí zapisovat do obchodních tabulek ani jiných úložišť.
+
 `POST /api/auth/login` a `POST /api/auth/logout` mění pouze přihlašovací session dashboardu, nikoliv obchodní data v Supabase.
 
 ## Pravidla pro další integrace

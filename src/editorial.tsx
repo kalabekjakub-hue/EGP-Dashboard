@@ -10,6 +10,7 @@ type EditorialTranslation = EditorialDraft & { id?: string; locale: string; draf
 export type EditorialArticle = { id: string; slug: string; status: string; published_at?: string | null; published_by?: string | null; hero_image_url?: string | null; countries: string[]; tags: string[]; source_topic?: string; created_at: string; updated_at: string; translations: EditorialTranslation[] };
 type EditorialTopic = { id: string; topic: string; target_characters: number; status: string; source: string; post_id?: string | null; last_error?: string | null; created_at: string };
 type EditorialSettings = { enabled: boolean; drafts_per_day: number; max_pending_reviews: number; generation_hour: number; autosave_enabled: boolean };
+type EditorialGuide = { id: string; filename: string; content: string; enabled: boolean; updated_at: string; updated_by?: string | null };
 type EditorialSource = { id: string; url: string; title: string; trust_level: string; fetched_at: string };
 type EditorialClaim = { id: string; claim_text: string; status: string; blog_claim_sources?: Array<{ source_id: string }> };
 
@@ -121,12 +122,23 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
 
 export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<EditorialSettings>({ enabled: false, drafts_per_day: 2, max_pending_reviews: 10, generation_hour: 7, autosave_enabled: true });
+  const [guides, setGuides] = useState<EditorialGuide[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "saving" | "saved" | "error">("loading");
+  const [guideState, setGuideState] = useState<"loading" | "ready" | "saving" | "error">("loading");
+  const [guideSetupRequired, setGuideSetupRequired] = useState(false);
   const [message, setMessage] = useState("");
+  const [guideMessage, setGuideMessage] = useState("");
   useEffect(() => {
-    void fetch("/api/editorial/settings")
-      .then(response => response.ok ? response.json() as Promise<{ settings?: EditorialSettings | null }> : Promise.reject())
-      .then(payload => { if (payload.settings) setSettings(payload.settings); setState("ready"); })
+    void Promise.all([fetch("/api/editorial/settings"), fetch("/api/editorial/guides")])
+      .then(async ([settingsResponse, guidesResponse]) => {
+        if (!settingsResponse.ok || !guidesResponse.ok) throw new Error();
+        const settingsPayload = await settingsResponse.json() as { settings?: EditorialSettings | null };
+        const guidesPayload = await guidesResponse.json() as { guides?: EditorialGuide[]; setupRequired?: boolean };
+        if (settingsPayload.settings) setSettings(settingsPayload.settings);
+        setGuides(guidesPayload.guides ?? []);
+        setGuideSetupRequired(guidesPayload.setupRequired === true);
+        setState("ready"); setGuideState("ready");
+      })
       .catch(() => { setState("error"); setMessage("Nastavení Redakce se nepodařilo načíst."); });
   }, []);
   const save = async () => {
@@ -140,7 +152,43 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
       window.setTimeout(() => setState(current => current === "saved" ? "ready" : current), 1800);
     } catch (error) { setState("error"); setMessage(error instanceof Error ? error.message : "Nastavení se nepodařilo uložit."); }
   };
-  return <div className="editorial-settings-modal" role="presentation" onMouseDown={onClose}><section className="editorial-settings-dialog surface" role="dialog" aria-modal="true" aria-labelledby="editorial-settings-title" onMouseDown={event => event.stopPropagation()}><button className="editorial-settings-close" onClick={onClose} aria-label="Zavřít nastavení">×</button><h2 id="editorial-settings-title">Automatizace článků</h2><p>Nastavení automatické tvorby a ukládání článků.</p><section className="editorial-settings"><label><span>Konceptů denně</span><input type="number" min={0} max={50} value={settings.drafts_per_day || ""} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, drafts_per_day: Number(event.target.value) }))} /></label><label><span>Strop čekajících konceptů</span><input type="number" min={0} max={500} value={settings.max_pending_reviews || ""} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, max_pending_reviews: Number(event.target.value) }))} /></label><label><span>Hodina spuštění</span><select value={settings.generation_hour} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, generation_hour: Number(event.target.value) }))}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select></label><div className="editorial-settings-switches"><label><span>Automatické generování</span><input type="checkbox" checked={settings.enabled} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, enabled: event.target.checked }))} /></label><label><span>Automatické ukládání</span><input type="checkbox" checked={settings.autosave_enabled} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, autosave_enabled: event.target.checked }))} /></label></div><button className={state === "saved" ? "saved" : ""} onClick={() => void save()} disabled={state === "loading" || state === "saving"}>{state === "saving" ? "Ukládám…" : state === "saved" ? "Uloženo" : "Uložit"}</button></section>{message && state === "error" && <div className="editorial-message error"><AlertTriangle size={17} />{message}</div>}</section></div>;
+  const uploadGuides = async (files: FileList | null) => {
+    const selected = Array.from(files ?? []); if (!selected.length) return;
+    setGuideState("saving"); setGuideMessage("");
+    try {
+      const created: EditorialGuide[] = [];
+      for (const file of selected) {
+        if (!file.name.toLowerCase().endsWith(".md")) throw new Error(`${file.name}: podporované jsou pouze soubory .md`);
+        const response = await fetch("/api/editorial/guides", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, content: await file.text(), enabled: true }) });
+        const payload = await response.json() as { guide?: EditorialGuide; error?: string };
+        if (!response.ok || !payload.guide) throw new Error(payload.error ?? `${file.name} se nepodařilo nahrát`);
+        created.push(payload.guide);
+      }
+      setGuides(current => [...current, ...created].sort((a, b) => a.filename.localeCompare(b.filename, "cs")));
+      setGuideState("ready");
+    } catch (error) { setGuideState("error"); setGuideMessage(error instanceof Error ? error.message : "Podklady se nepodařilo nahrát."); }
+  };
+  const saveGuide = async (guide: EditorialGuide) => {
+    setGuideState("saving"); setGuideMessage("");
+    try {
+      const response = await fetch(`/api/editorial/guides/${guide.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: guide.filename, content: guide.content, enabled: guide.enabled }) });
+      const payload = await response.json() as { guide?: EditorialGuide; error?: string };
+      if (!response.ok || !payload.guide) throw new Error(payload.error ?? "Podklad se nepodařilo uložit");
+      setGuides(current => current.map(item => item.id === guide.id ? payload.guide! : item).sort((a, b) => a.filename.localeCompare(b.filename, "cs")));
+      setGuideState("ready");
+    } catch (error) { setGuideState("error"); setGuideMessage(error instanceof Error ? error.message : "Podklad se nepodařilo uložit."); }
+  };
+  const deleteGuide = async (guide: EditorialGuide) => {
+    if (!window.confirm(`Odstranit podklad „${guide.filename}“?`)) return;
+    setGuideState("saving"); setGuideMessage("");
+    try {
+      const response = await fetch(`/api/editorial/guides/${guide.id}`, { method: "DELETE" });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Podklad se nepodařilo odstranit");
+      setGuides(current => current.filter(item => item.id !== guide.id)); setGuideState("ready");
+    } catch (error) { setGuideState("error"); setGuideMessage(error instanceof Error ? error.message : "Podklad se nepodařilo odstranit."); }
+  };
+  return <div className="editorial-settings-modal" role="presentation" onMouseDown={onClose}><section className="editorial-settings-dialog surface" role="dialog" aria-modal="true" aria-labelledby="editorial-settings-title" onMouseDown={event => event.stopPropagation()}><button className="editorial-settings-close" onClick={onClose} aria-label="Zavřít nastavení">×</button><h2 id="editorial-settings-title">Nastavení Redakce</h2><p>Automatizace a interní Markdown podklady pro AI.</p><div className="editorial-settings-columns"><section><header className="editorial-settings-section-title"><h3>Automatizace článků</h3></header><section className="editorial-settings"><label><span>Konceptů denně</span><input type="number" min={0} max={50} value={settings.drafts_per_day || ""} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, drafts_per_day: Number(event.target.value) }))} /></label><label><span>Strop čekajících konceptů</span><input type="number" min={0} max={500} value={settings.max_pending_reviews || ""} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, max_pending_reviews: Number(event.target.value) }))} /></label><label><span>Hodina spuštění</span><select value={settings.generation_hour} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, generation_hour: Number(event.target.value) }))}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{hour}:00</option>)}</select></label><div className="editorial-settings-switches"><label><span>Automatické generování</span><input type="checkbox" checked={settings.enabled} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, enabled: event.target.checked }))} /></label><label><span>Automatické ukládání</span><input type="checkbox" checked={settings.autosave_enabled} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, autosave_enabled: event.target.checked }))} /></label></div><button className={state === "saved" ? "saved" : ""} onClick={() => void save()} disabled={state === "loading" || state === "saving"}>{state === "saving" ? "Ukládám…" : state === "saved" ? "Uloženo" : "Uložit nastavení"}</button></section>{message && state === "error" && <div className="editorial-message error"><AlertTriangle size={17} />{message}</div>}</section><section className="editorial-guide-settings"><header className="editorial-settings-section-title"><div><h3>Podklady pro AI</h3><p>Aktivní soubory AI použije při tvorbě článků, překladů i témat.</p></div><label className="editorial-guide-upload">Nahrát .md<input type="file" accept=".md,text/markdown" multiple disabled={guideState === "saving" || guideSetupRequired} onChange={event => { void uploadGuides(event.target.files); event.target.value = ""; }} /></label></header>{guideSetupRequired ? <div className="editorial-guide-empty error">Nejdřív je potřeba aplikovat migraci pro AI podklady.</div> : guides.length ? <div className="editorial-guide-list">{guides.map(guide => <article key={guide.id}><div className="editorial-guide-head"><input aria-label="Název Markdown podkladu" value={guide.filename} maxLength={120} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, filename: event.target.value } : item))} /><span>{guide.content.length.toLocaleString("cs-CZ")} / 20 000 znaků</span></div><textarea value={guide.content} maxLength={20000} spellCheck={false} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, content: event.target.value } : item))} /><footer><label><span>Aktivní pro AI</span><input type="checkbox" checked={guide.enabled} disabled={guideState === "saving"} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, enabled: event.target.checked } : item))} /></label><div><button className="remove" disabled={guideState === "saving"} onClick={() => void deleteGuide(guide)}>Odstranit</button><button disabled={guideState === "saving" || !guide.filename.trim() || !guide.content.trim()} onClick={() => void saveGuide(guide)}>Uložit podklad</button></div></footer></article>)}</div> : <div className="editorial-guide-empty">Zatím nejsou nahrané žádné podklady. Začni soubory brand-context.md, writing-style.md, article-structure.md a editorial-rules.md.</div>}{guideMessage && <div className="editorial-message error"><AlertTriangle size={17} />{guideMessage}</div>}</section></div></section></div>;
 }
 
 export function EditorialArticleEditor({ articleId, initialLocale = "cs", onLocaleChange, back }: { articleId: string; initialLocale?: string; onLocaleChange?: (locale: string) => void; back: () => void }) {
