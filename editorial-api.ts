@@ -330,6 +330,11 @@ export function editorialApi() {
             const generated = await openaiResponse(`Navrhni jedno konkrétní praktické SEO téma pro krátký článek EuroGoPass o dálničních známkách, mýtném nebo cestě autem mezi evropskými zeměmi. Má odpovídat reálnému dotazu cestovatele, nebýt duplicitní a mít jasný informační záměr. Vrať jen téma, ne hotový titulek. Existující témata:\n- ${existing}`, "eurogopass_topic", topicSchema, translationModel, false);
             return json(res, 200, { topic: generated.data.topic });
           }
+          const deleteTopicMatch = route.match(/^\/topics\/([^/]+)$/);
+          if (method === "DELETE" && deleteTopicMatch) {
+            await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(decodeURIComponent(deleteTopicMatch[1]))}`, { method: "DELETE" });
+            return json(res, 200, { deleted: true });
+          }
           const generateMatch = route.match(/^\/topics\/([^/]+)\/generate$/);
           if (method === "POST" && generateMatch) return json(res, 200, await generateArticle(decodeURIComponent(generateMatch[1])));
           const saveMatch = route.match(/^\/articles\/([^/]+)\/locales\/([^/]+)$/);

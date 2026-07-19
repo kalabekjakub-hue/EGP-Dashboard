@@ -4,19 +4,21 @@
 
 ## Bezpečnostní hranice
 
-Dashboard je read-only administrativní pohled. Jeho backend smí měnit produkční data pouze jedinou operací:
+Dashboard je read-only administrativní pohled s výslovně povolenými write operacemi pro fulfillment a oddělenou Redakci/blog. Obchodní data smí měnit pouze tato operace:
 
 ```text
 POST /api/orders/fulfill-item
 ```
 
-Operace smí pouze označit existující `order_items` nebo `order_bridge_toll_items` jako `fulfilled` a doplnit `fulfilled_at`. Všechny ostatní ne-GET požadavky pod `/api` server odmítne stavem `405`.
+Operace smí pouze označit existující `order_items` nebo `order_bridge_toll_items` jako `fulfilled` a doplnit `fulfilled_at`. Ostatní ne-GET požadavky nad obchodními daty server odmítne stavem `405`.
+
+Redakční endpoint `DELETE /api/editorial/topics/:id` smí smazat pouze vybrané téma z tabulky `blog_topic_queue`. Nesmí mazat navázaný článek, překlady ani žádná obchodní data. Ostatní zápisy Redakce musí zůstat omezené na tabulky `blog_*` a redakční úložiště.
 
 `POST /api/auth/login` a `POST /api/auth/logout` mění pouze přihlašovací session dashboardu, nikoliv obchodní data v Supabase.
 
 ## Pravidla pro další integrace
 
-- Supabase, PostHog, logy, screenshoty, doklady, Retell AI a blog jsou z pohledu dashboardu pouze zdroje pro čtení.
+- Supabase, PostHog, logy, screenshoty, doklady a Retell AI jsou z pohledu dashboardu pouze zdroje pro čtení; výjimkou jsou výslovně povolené fulfillment a redakční operace popsané výše.
 - Tajné klíče patří pouze do serverového prostředí na VPS; nikdy do `VITE_*` proměnných.
 - Příjem e-mailu, Retell webhooků a dalších externích událostí musí zajišťovat samostatný ingest/worker. Dashboard tato data pouze čte ze Supabase.
 - `orders.invoice_pdf_path` označuje fakturu vystavenou EuroGoPass zákazníkovi. Nesmí se prezentovat jako nákupní doklad z oficiálního portálu.
