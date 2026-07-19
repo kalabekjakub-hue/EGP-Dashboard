@@ -286,6 +286,21 @@ async function uploadHero(postId: string, filename: string, contentType: string,
   return { url: publicUrl };
 }
 
+async function removeHero(postId: string) {
+  const { supabaseUrl, supabaseKey } = config();
+  if (!supabaseUrl || !supabaseKey) throw new Error("Supabase konfigurace není dostupná");
+  const rows = await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}&select=hero_image_url&limit=1`) as Array<{ hero_image_url?: string | null }>;
+  const publicUrl = rows[0]?.hero_image_url;
+  const marker = "/storage/v1/object/public/blog-hero-images/";
+  if (publicUrl?.includes(marker)) {
+    const path = publicUrl.split(marker)[1];
+    const response = await fetch(`${supabaseUrl}/storage/v1/object/blog-hero-images/${path}`, { method: "DELETE", headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` } });
+    if (!response.ok && response.status !== 404) throw new Error(`Smazání obrázku selhalo: ${await response.text()}`);
+  }
+  await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}`, { method: "PATCH", body: JSON.stringify({ hero_image_url: null, updated_at: new Date().toISOString() }) });
+  return { deleted: true };
+}
+
 export function editorialApi() {
   return {
     name: "eurogopass-editorial-api",
@@ -345,6 +360,7 @@ export function editorialApi() {
           if (method === "POST" && publishMatch) return json(res, 200, await publishArticle(decodeURIComponent(publishMatch[1])));
           const heroMatch = route.match(/^\/articles\/([^/]+)\/hero$/);
           if (method === "PUT" && heroMatch) return json(res, 200, await uploadHero(decodeURIComponent(heroMatch[1]), url.searchParams.get("filename") ?? "hero.jpg", req.headers["content-type"] ?? "application/octet-stream", req));
+          if (method === "DELETE" && heroMatch) return json(res, 200, await removeHero(decodeURIComponent(heroMatch[1])));
           const deleteMatch = route.match(/^\/articles\/([^/]+)$/);
           if (method === "DELETE" && deleteMatch) { await supabase(`blog_posts?id=eq.${encodeURIComponent(deleteMatch[1])}`, { method: "DELETE" }); return json(res, 200, { deleted: true }); }
           json(res, 404, { error: "Editorial route not found" });

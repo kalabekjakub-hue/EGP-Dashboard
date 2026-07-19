@@ -14,6 +14,8 @@ Operace smí pouze označit existující `order_items` nebo `order_bridge_toll_i
 
 Redakční endpoint `DELETE /api/editorial/topics/:id` smí smazat pouze vybrané téma z tabulky `blog_topic_queue`. Nesmí mazat navázaný článek, překlady ani žádná obchodní data. Ostatní zápisy Redakce musí zůstat omezené na tabulky `blog_*` a redakční úložiště.
 
+Redakční endpoint `DELETE /api/editorial/articles/:id/hero` smí odstranit pouze hlavní obrázek daného článku z bucketu `blog-hero-images` a vyprázdnit `blog_posts.hero_image_url`. Nesmí měnit ani mazat jiné soubory, článek, překlady nebo obchodní data.
+
 `POST /api/auth/login` a `POST /api/auth/logout` mění pouze přihlašovací session dashboardu, nikoliv obchodní data v Supabase.
 
 ## Pravidla pro další integrace
