@@ -9,6 +9,7 @@
     "start": "cross-env NODE_ENV=production tsx server.ts",
     "ingest:mail": "tsx mail-ingest.ts",
     "editorial:worker": "tsx editorial-worker.ts",
+    "test": "node --import tsx --test editorial-api.test.ts",
     "ingest:mail:backfill": "tsx mail-ingest.ts --once --all",
     "gmail:authorize": "tsx scripts/gmail-authorize.ts",
     "lint": "eslint .",
