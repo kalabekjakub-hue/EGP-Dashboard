@@ -492,8 +492,12 @@ function money(value: number, currency = "EUR") {
 }
 
 function profitMoney(order: Order) {
-  const profit = order.profit ?? Math.floor((order.total * 0.1 + Number.EPSILON) * 100) / 100;
-  return money(profit, order.currency);
+  const profit = order.profitEur ?? order.profit ?? Math.floor(((order.totalEur ?? order.total) * 0.1 + Number.EPSILON) * 100) / 100;
+  return money(profit);
+}
+
+function orderMoney(order: Order) {
+  return money(order.totalEur ?? order.total);
 }
 
 function vehicleLabel(value?: string) {
@@ -663,7 +667,7 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
       <div className="order-primary">
         <div className="plate"><Flag code={order.registrationCode} /><strong>{order.plate}</strong></div>
         <div className="price-summary">
-          <strong className="price">{money(order.total, order.currency)}</strong>
+          <strong className="price">{orderMoney(order)}</strong>
           <small className="profit">({profitMoney(order)})</small>
         </div>
       </div>
@@ -785,7 +789,7 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
   const failed = todayOrders.filter(order => order.status === "failed").length;
   return {
     orders: todayOrders.length,
-    revenue: paidToday.reduce((sum, order) => sum + order.total, 0),
+    revenue: paidToday.reduce((sum, order) => sum + (order.totalEur ?? order.total), 0),
     completed,
     failed,
     waiting: Math.max(0, todayOrders.length - completed - failed),
@@ -1253,7 +1257,7 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
       <section className={`detail-hero ${order.status}`}>
         <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p>{order.plus && <span className="plus-badge"><Plus size={13} strokeWidth={3} /> Plus</span>}</div></div>
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
-        <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{money(order.total, order.currency)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
+        <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
         <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemId(""); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
       </section>
       <section className="items-section">

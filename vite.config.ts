@@ -304,6 +304,7 @@ function supabaseReadApi() {
           const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=200`, { headers });
           if (!orderResponse.ok) throw new Error(`Orders API ${orderResponse.status}`);
           const rawOrders = await orderResponse.json() as RawOrder[];
+          const ecbRates = await loadEcbRates();
           const ids = rawOrders.map(order => order.id);
           const vignetteSelect = "id,order_id,country_code,validity,start_date,end_date,price_eur_minor,status,created_at,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,fulfillment_screenshots_meta";
           const tollSelect = "id,order_id,toll_id,country_code,pass_count,pass_date,price_eur_minor,status,created_at,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,fulfillment_screenshots_meta";
@@ -392,13 +393,18 @@ function supabaseReadApi() {
               : items.some(item => item.status === "failed") ? "failed"
               : items.some(item => item.status === "processing") ? "processing"
               : items.length && items.every(item => item.status === "fulfilled") ? "fulfilled" : "waiting";
+            const conversionDate = order.paid_at ?? order.created_at;
+            const total = order.amount_total_minor / 100;
+            const profit = order.processing_fee_minor / 100;
             return {
               id: order.id, number: order.order_number, plate: order.plate,
               registrationCountry: order.registration_country, registrationCode: order.registration_country.toLowerCase(),
               email: order.email, createdAt: formatDate(order.created_at), paidAt: formatDate(order.paid_at), originalPendingCreatedAt: originalPendingCreatedAt.has(order.id) ? formatDate(originalPendingCreatedAt.get(order.id)) : undefined,
-              total: order.amount_total_minor / 100,
+              total,
               currency: order.currency,
-              profit: order.processing_fee_minor / 100,
+              totalEur: convertAmountToEur(total, order.currency, conversionDate, ecbRates),
+              profit,
+              profitEur: convertAmountToEur(profit, order.currency, conversionDate, ecbRates),
               vehicleType: order.vehicle_type, fuelType: order.fuel_type, vin: order.vehicle_vin,
               plus: order.flex_enabled,
               locale: order.locale,
@@ -1109,6 +1115,17 @@ function convertCurrencyRowsToEur(rows: unknown[][], rates: Map<string, Map<stri
     if (!rate) throw new Error(`ECB nemá kurz ${currency} pro ${day}`);
     return total + amount / rate;
   }, 0);
+}
+
+function convertAmountToEur(amount: number, currency: string, date: string, rates: Map<string, Map<string, number>>) {
+  const normalizedCurrency = String(currency || "EUR").toUpperCase();
+  if (normalizedCurrency === "EUR") return amount;
+  const day = pragueDate(date);
+  const availableDays = [...rates.keys()].sort();
+  const rateDay = [...availableDays].reverse().find(candidate => candidate <= day) ?? availableDays[0];
+  const rate = rates.get(rateDay)?.get(normalizedCurrency);
+  if (!rate) throw new Error(`ECB nemá kurz ${normalizedCurrency} pro ${day}`);
+  return amount / rate;
 }
 
 type PaidOrderAnalyticsRow = {

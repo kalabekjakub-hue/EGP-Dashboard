@@ -37,7 +37,9 @@ export type Order = {
   originalPendingCreatedAt?: string;
   total: number;
   currency?: string;
+  totalEur?: number;
   profit?: number;
+  profitEur?: number;
   plus: boolean;
   vehicleType?: string;
   fuelType?: string;
