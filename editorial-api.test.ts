@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
+import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -52,6 +52,52 @@ test("loads the shared SEO/GEO contract for every AI stage", () => {
   assert.match(writingStylesContract, /factual/);
   assert.match(writingStylesContract, /roadmate/);
   assert.match(writingStylesContract, /Faktická přesnost je ve všech profilech stejná/i);
+  assert.match(keywordClustersContract, /Nejdříve cluster, potom téma/i);
+  assert.match(keywordClustersContract, /jeden den, deset dní, měsíc, dva měsíce nebo rok/i);
+  assert.match(keywordClustersContract, /nemá pevné minimum ani maximum/i);
+});
+
+test("keyword opportunity score is stable and does not use random ordering", () => {
+  const keyword = {
+    id: "keyword",
+    query: "rakouská dálniční známka",
+    normalized_query: "rakouská dálniční známka",
+    source: "search_console" as const,
+    impressions: 22,
+    clicks: 0,
+    ctr: 0,
+    position: 62,
+    suggested_count: 0,
+    generated_count: 0,
+    published_count: 0,
+    last_imported_at: "2026-07-20T10:45:30.000Z",
+  };
+  const now = new Date("2026-07-20T12:00:00.000Z").getTime();
+  assert.equal(keywordOpportunityScore(keyword, now), keywordOpportunityScore(keyword, now));
+});
+
+test("keyword opportunity values aggregate demand above one isolated good position", () => {
+  const now = new Date("2026-07-20T12:00:00.000Z").getTime();
+  const shared = { id: "", normalized_query: "", source: "search_console" as const, clicks: 0, ctr: 0, suggested_count: 0, generated_count: 0, published_count: 0, last_imported_at: "2026-07-20T10:45:30.000Z" };
+  const broad = keywordOpportunityScore({ ...shared, id: "broad", query: "vignette österreich", normalized_query: "vignette österreich", impressions: 22, position: 62 }, now);
+  const narrow = keywordOpportunityScore({ ...shared, id: "narrow", query: "rakúska diaľničná známka 10 dní", normalized_query: "rakúska diaľničná známka 10 dní", impressions: 1, position: 18 }, now);
+  assert.ok(broad > narrow);
+});
+
+test("article target of 4500 characters allows only a ten percent deviation", () => {
+  assert.deepEqual(articleLengthRange(4500), { target: 4500, minimum: 4050, maximum: 4950 });
+  assert.equal(articleLengthStatus("x".repeat(4050), 4500).valid, true);
+  assert.equal(articleLengthStatus("x".repeat(4950), 4500).valid, true);
+  assert.equal(articleLengthStatus("x".repeat(4049), 4500).valid, false);
+  assert.equal(articleLengthStatus("x".repeat(4951), 4500).valid, false);
+});
+
+test("article length repair must preserve every number and Markdown destination", () => {
+  const original = "Známka stojí 12,80 EUR a platí 10 dní. [Rakousko](https://eurogopass.com/cs/coverage/at)";
+  assert.equal(articleLengthRepairSafety(original, `${original} Praktický krok bez nového faktu.`).safe, true);
+  assert.equal(articleLengthRepairSafety(original, original.replace("10 dní", "deset dní")).safe, false);
+  assert.equal(articleLengthRepairSafety(original, `${original} Cena pro motorku je 5,10 EUR.`).safe, false);
+  assert.equal(articleLengthRepairSafety(original, original.replace("/coverage/at", "/coverage/de")).safe, false);
 });
 
 test("SEO audit hash becomes stale when metadata changes", () => {
