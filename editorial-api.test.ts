@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
+import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -90,6 +90,14 @@ test("article target of 4500 characters allows only a ten percent deviation", ()
   assert.equal(articleLengthStatus("x".repeat(4950), 4500).valid, true);
   assert.equal(articleLengthStatus("x".repeat(4049), 4500).valid, false);
   assert.equal(articleLengthStatus("x".repeat(4951), 4500).valid, false);
+});
+
+test("editorial target explicitly overrides AI topic length planning", () => {
+  assert.equal(requestedArticleLength(2000), 2000);
+  assert.equal(requestedArticleLength("4500"), 4500);
+  assert.equal(requestedArticleLength(undefined), null);
+  assert.throws(() => requestedArticleLength(499), /500/);
+  assert.throws(() => requestedArticleLength(12001), /12 000/);
 });
 
 test("article length repair must preserve every number and Markdown destination", () => {

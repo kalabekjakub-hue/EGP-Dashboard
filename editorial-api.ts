@@ -200,6 +200,13 @@ export function articleLengthStatus(body: unknown, targetCharacters: number) {
   return { ...range, actual, valid: actual >= range.minimum && actual <= range.maximum };
 }
 
+export function requestedArticleLength(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const target = Math.round(Number(value));
+  if (!Number.isFinite(target) || target < 500 || target > 12_000) throw Object.assign(new Error("Počet znaků musí být mezi 500 a 12 000"), { status: 400 });
+  return target;
+}
+
 function uniqueSeoGeoWarnings(warnings: SeoGeoWarning[]) {
   const unique = new Map<string, SeoGeoWarning>();
   for (const warning of warnings) {
@@ -730,7 +737,7 @@ function topicSchema(requireKeyword: boolean) {
     required: ["topic", "target_characters", "cluster_summary", "subtopics", "keyword_ids"],
     properties: {
       topic: { type: "string" },
-      target_characters: { type: "integer", minimum: 2_200, maximum: 8_000 },
+      target_characters: { type: "integer", minimum: 500, maximum: 12_000 },
       cluster_summary: { type: "string" },
       subtopics: { type: "array", minItems: 1, items: { type: "string" } },
       keyword_ids: { type: "array", ...(requireKeyword ? { minItems: 1 } : {}), items: { type: "string" } },
@@ -911,7 +918,8 @@ async function saveSeoAudit(postId: string, locale: string, contentHash: string,
   return { ...report, warnings: normalized, content_hash: contentHash, checked_at: checkedAt, model };
 }
 
-async function suggestEditorialTopic() {
+async function suggestEditorialTopic(requestedTargetCharacters?: unknown) {
+  const fixedTargetCharacters = requestedArticleLength(requestedTargetCharacters);
   const [articles, topics, guidance, candidates] = await Promise.all([
     supabase("blog_posts?select=slug,source_topic&order=created_at.desc&limit=100") as Promise<Array<Record<string, unknown>>>,
     supabase("blog_topic_queue?select=topic&order=created_at.desc&limit=100") as Promise<Array<Record<string, unknown>>>,
@@ -941,7 +949,7 @@ Navrhni jedno konkrétní praktické téma pro český článek EuroGoPass o dá
 - Téma je vždy česky a vychází z jednoho skutečného uživatelského záměru v SEO/GEO poolu, pokud pool není prázdný.
 - Je dost konkrétní pro titulek článku a umožní dát přímou odpověď v perexu.
 - cluster_summary stručně popíše společný záměr a subtopics vypíše skutečně odlišné sekce, které má jeden článek pokrýt.
-- target_characters zvol mezi 2 200 a 8 000 podle šíře clusteru; široký přehled variant musí dostat dost prostoru, ale bez výplně.
+${fixedTargetCharacters === null ? "- target_characters zvol mezi 2 200 a 8 000 podle šíře clusteru; široký přehled variant musí dostat dost prostoru, ale bez výplně." : `- target_characters nastav přesně na ${fixedTargetCharacters}. Jde o pevné zadání redaktora; šíři tématu přizpůsob tak, aby se dalo kvalitně zodpovědět v tomto rozsahu.`}
 - Nejde o osnovu ani hotový článek.
 - Podobné téma je povolené; existující témata návrh neblokují.
 
@@ -952,7 +960,7 @@ Navrhni jedno konkrétní praktické téma pro český článek EuroGoPass o dá
     if (!topic) throw new Error("AI nevrátila použitelné téma");
     const keywordIds = validKeywordIds(generated.data.keyword_ids, candidates);
     if (candidates.length && !keywordIds.length) throw new Error("AI nevázala navržené téma na žádné klíčové slovo z poolu");
-    const targetCharacters = Math.min(8_000, Math.max(2_200, Number(generated.data.target_characters ?? 2_200)));
+    const targetCharacters = fixedTargetCharacters ?? Math.min(8_000, Math.max(2_200, Number(generated.data.target_characters ?? 2_200)));
     await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
     return { topic, keywordIds, targetCharacters };
   } catch (error) {
@@ -961,8 +969,8 @@ Navrhni jedno konkrétní praktické téma pro český článek EuroGoPass o dá
   }
 }
 
-async function createSuggestedTopic() {
-  const suggestion = await suggestEditorialTopic();
+async function createSuggestedTopic(requestedTargetCharacters?: unknown) {
+  const suggestion = await suggestEditorialTopic(requestedTargetCharacters);
   const rows = await supabase("blog_topic_queue", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ topic: suggestion.topic, target_characters: suggestion.targetCharacters, source: "ai", status: "queued" }) }) as Array<Record<string, unknown>>;
   const topic = rows[0];
   if (!topic) throw new Error("Téma se nepodařilo uložit");
@@ -1575,7 +1583,8 @@ export function editorialApi(actorEmail: (req: import("node:http").IncomingMessa
             return json(res, 201, { topics: rows });
           }
           if (method === "POST" && route === "/topics/suggest") {
-            return json(res, 201, { topic: await createSuggestedTopic() });
+            const body = await readBody(req);
+            return json(res, 201, { topic: await createSuggestedTopic(body.targetCharacters) });
           }
           const deleteTopicMatch = route.match(/^\/topics\/([^/]+)$/);
           if (method === "DELETE" && deleteTopicMatch) {
