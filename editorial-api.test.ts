@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, internalLinkContext, internalLinksContract, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, seoContentHash, seoGeoContract, seoRefreshSafety } from "./editorial-api";
+import { deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -48,12 +48,36 @@ test("loads the shared SEO/GEO contract for every AI stage", () => {
   assert.match(internalLinksContract, /Markdown/);
   assert.match(internalLinksContract, /plánovač/i);
   assert.match(internalLinksContract, /lokaliz/i);
+  assert.match(writingStylesContract, /balanced/);
+  assert.match(writingStylesContract, /factual/);
+  assert.match(writingStylesContract, /roadmate/);
+  assert.match(writingStylesContract, /Faktická přesnost je ve všech profilech stejná/i);
 });
 
 test("SEO audit hash becomes stale when metadata changes", () => {
   const base = { title: "Rakouská dálniční známka", excerpt: "Přímá odpověď", seo_title: "Rakouská dálniční známka pro cestu autem", seo_description: "Popis", slug: "rakouska-dalnicni-znamka", body_md: "Obsah" };
   assert.notEqual(seoContentHash(base), seoContentHash({ ...base, excerpt: "Změněná přímá odpověď" }));
   assert.notEqual(seoContentHash(base), seoContentHash({ ...base, seo_description: "Změněný SEO popis" }));
+});
+
+test("SEO/GEO fallback report keeps the two quality dimensions independent", () => {
+  const report = fallbackSeoGeoReport([
+    { severity: "warning", location: "Meta description", message: "Meta description chybí." },
+    { severity: "warning", location: "Nadpisy", message: "Sekce nemají konkrétní nadpisy." },
+    { severity: "warning", location: "Fakta", message: "Důležité číslo nemá uvedený zdroj." },
+  ]);
+  assert.ok(report.seo_score < 100);
+  assert.ok(report.geo_score < 100);
+  assert.notEqual(report.seo_score, report.geo_score);
+  assert.equal(report.seo_checks.length, 4);
+  assert.equal(report.geo_checks.length, 4);
+});
+
+test("SEO/GEO fallback report returns a complete excellent baseline", () => {
+  const report = fallbackSeoGeoReport([]);
+  assert.equal(report.seo_score, 100);
+  assert.equal(report.geo_score, 100);
+  assert.match(report.summary, /velmi dobrém stavu/i);
 });
 
 test("deterministic SEO/GEO audit catches missing metadata and invalid H1", () => {

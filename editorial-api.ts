@@ -17,9 +17,12 @@ const editorialLocaleNames: Record<string, string> = {
 };
 export const seoGeoContract = readFileSync(new URL("./editorial-prompts/seo-geo.md", import.meta.url), "utf8").trim();
 export const internalLinksContract = readFileSync(new URL("./editorial-prompts/internal-links.md", import.meta.url), "utf8").trim();
+export const writingStylesContract = readFileSync(new URL("./editorial-prompts/writing-styles.md", import.meta.url), "utf8").trim();
 const editorialAiInstructions = `${seoGeoContract}
 
 ${internalLinksContract}
+
+${writingStylesContract}
 
 # Hierarchie a bezpečnost
 
@@ -331,6 +334,26 @@ type SeoKeyword = {
 };
 
 type SeoGeoWarning = { severity: "info" | "warning"; location: string; message: string };
+type SeoGeoCheck = { label: string; score: number; note: string };
+type SeoGeoReport = { seo_score: number; geo_score: number; summary: string; seo_checks: SeoGeoCheck[]; geo_checks: SeoGeoCheck[] };
+type WritingStyle = "balanced" | "factual" | "roadmate";
+
+const writingStyleLabels: Record<WritingStyle, string> = { balanced: "Vyvážený", factual: "Faktický průvodce", roadmate: "Parťák na cestu" };
+
+function writingStyle(value: unknown): WritingStyle {
+  return value === "factual" || value === "roadmate" ? value : "balanced";
+}
+
+function requestedWritingStyle(value: unknown): WritingStyle {
+  if (value === undefined || value === "balanced") return "balanced";
+  if (value === "factual" || value === "roadmate") return value;
+  throw Object.assign(new Error("Neplatný styl článku"), { status: 400 });
+}
+
+function writingStyleContext(value: unknown) {
+  const profile = writingStyle(value);
+  return `\n\n# Zvolený styl článku\nPoužij profil \`${profile}\` — ${writingStyleLabels[profile]}. Dodrž jeho definici ze smlouvy stylů a nemíchej do něj ostatní profily.`;
+}
 
 export function normalizeKeyword(value: string) {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -553,10 +576,20 @@ const keywordUsageSchema = {
   },
 };
 
+const seoAuditCheckSchema = { type: "object", additionalProperties: false, required: ["label", "score", "note"], properties: { label: { type: "string" }, score: { type: "integer", minimum: 0, maximum: 100 }, note: { type: "string" } } };
+const seoGeoScoreRequired = ["seo_score", "geo_score", "summary", "seo_checks", "geo_checks"];
+const seoGeoScoreProperties = {
+  seo_score: { type: "integer", minimum: 0, maximum: 100 },
+  geo_score: { type: "integer", minimum: 0, maximum: 100 },
+  summary: { type: "string" },
+  seo_checks: { type: "array", minItems: 3, maxItems: 6, items: seoAuditCheckSchema },
+  geo_checks: { type: "array", minItems: 3, maxItems: 6, items: seoAuditCheckSchema },
+};
+
 const articleSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["title", "excerpt", "body_md", "seo_title", "seo_description", "slug", "countries", "tags", "claims", "keyword_usage", "seo_geo_warnings"],
+  required: ["title", "excerpt", "body_md", "seo_title", "seo_description", "slug", "countries", "tags", "claims", "keyword_usage", "seo_geo_warnings", ...seoGeoScoreRequired],
   properties: {
     title: { type: "string" }, excerpt: { type: "string" }, body_md: { type: "string" },
     seo_title: { type: "string" }, seo_description: { type: "string" }, slug: { type: "string" },
@@ -564,6 +597,7 @@ const articleSchema = {
     claims: { type: "array", items: { type: "object", additionalProperties: false, required: ["text", "verified", "source_urls"], properties: { text: { type: "string" }, verified: { type: "boolean" }, source_urls: { type: "array", items: { type: "string" } } } } },
     keyword_usage: keywordUsageSchema,
     seo_geo_warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["severity", "location", "message"], properties: { severity: { type: "string", enum: ["info", "warning"] }, location: { type: "string" }, message: { type: "string" } } } },
+    ...seoGeoScoreProperties,
   },
 };
 
@@ -572,10 +606,11 @@ const translationSchema = {
   additionalProperties: false,
   required: ["translations"],
   properties: {
-    translations: { type: "array", items: { type: "object", additionalProperties: false, required: ["locale", "title", "excerpt", "body_md", "seo_title", "seo_description", "slug", "hero_image_alt", "keyword_usage", "seo_geo_warnings"], properties: {
+    translations: { type: "array", items: { type: "object", additionalProperties: false, required: ["locale", "title", "excerpt", "body_md", "seo_title", "seo_description", "slug", "hero_image_alt", "keyword_usage", "seo_geo_warnings", ...seoGeoScoreRequired], properties: {
       locale: { type: "string" }, title: { type: "string" }, excerpt: { type: "string" }, body_md: { type: "string" }, seo_title: { type: "string" }, seo_description: { type: "string" }, slug: { type: "string" }, hero_image_alt: { type: "string" },
       keyword_usage: keywordUsageSchema,
       seo_geo_warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["severity", "location", "message"], properties: { severity: { type: "string", enum: ["info", "warning"] }, location: { type: "string" }, message: { type: "string" } } } },
+      ...seoGeoScoreProperties,
     } } },
   },
 };
@@ -583,13 +618,14 @@ const translationSchema = {
 const seoRefreshSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["title", "excerpt", "body_md", "seo_title", "seo_description", "slug", "hero_image_alt", "keyword_usage", "seo_geo_warnings", "changes"],
+  required: ["title", "excerpt", "body_md", "seo_title", "seo_description", "slug", "hero_image_alt", "keyword_usage", "seo_geo_warnings", "changes", ...seoGeoScoreRequired],
   properties: {
     title: { type: "string" }, excerpt: { type: "string" }, body_md: { type: "string" },
     seo_title: { type: "string" }, seo_description: { type: "string" }, slug: { type: "string" }, hero_image_alt: { type: "string" },
     keyword_usage: keywordUsageSchema,
     seo_geo_warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["severity", "location", "message"], properties: { severity: { type: "string", enum: ["info", "warning"] }, location: { type: "string" }, message: { type: "string" } } } },
     changes: { type: "array", items: { type: "object", additionalProperties: false, required: ["field", "summary"], properties: { field: { type: "string" }, summary: { type: "string" } } } },
+    ...seoGeoScoreProperties,
   },
 };
 
@@ -597,7 +633,19 @@ function topicSchema(requireKeyword: boolean) {
   return { type: "object", additionalProperties: false, required: ["topic", "keyword_ids"], properties: { topic: { type: "string" }, keyword_ids: { type: "array", ...(requireKeyword ? { minItems: 1 } : {}), items: { type: "string" } } } };
 }
 const keywordSelectionSchema = { type: "object", additionalProperties: false, required: ["keyword_ids"], properties: { keyword_ids: { type: "array", items: { type: "string" } } } };
-const seoAuditSchema = { type: "object", additionalProperties: false, required: ["warnings"], properties: { warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["severity", "location", "message"], properties: { severity: { type: "string", enum: ["info", "warning"] }, location: { type: "string" }, message: { type: "string" } } } } } };
+const seoAuditSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["seo_score", "geo_score", "summary", "seo_checks", "geo_checks", "warnings"],
+  properties: {
+    seo_score: { type: "integer", minimum: 0, maximum: 100 },
+    geo_score: { type: "integer", minimum: 0, maximum: 100 },
+    summary: { type: "string" },
+    seo_checks: { type: "array", minItems: 3, maxItems: 6, items: seoAuditCheckSchema },
+    geo_checks: { type: "array", minItems: 3, maxItems: 6, items: seoAuditCheckSchema },
+    warnings: { type: "array", items: { type: "object", additionalProperties: false, required: ["severity", "location", "message"], properties: { severity: { type: "string", enum: ["info", "warning"] }, location: { type: "string" }, message: { type: "string" } } } },
+  },
+};
 
 function keywordPromptRows(keywords: SeoKeyword[]) {
   return keywords.map(row => JSON.stringify({ id: row.id, query: row.query, source: row.source, impressions: row.impressions ?? null, clicks: row.clicks ?? null, ctr: row.ctr ?? null, position: row.position ?? null })).join("\n");
@@ -681,10 +729,75 @@ function normalizeSeoGeoWarnings(warnings: unknown) {
   return uniqueSeoGeoWarnings(normalized);
 }
 
-async function saveSeoAudit(postId: string, locale: string, contentHash: string, warnings: unknown, model: string) {
+function clampAuditScore(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : fallback;
+}
+
+function fallbackAuditCheck(label: string, warnings: SeoGeoWarning[], pattern: RegExp): SeoGeoCheck {
+  const matching = warnings.filter(warning => pattern.test(`${warning.location} ${warning.message}`));
+  const penalty = matching.reduce((total, warning) => total + (warning.severity === "warning" ? 14 : 6), 0);
+  return { label, score: Math.max(20, 100 - penalty), note: matching[0]?.message ?? "Bez zjištěného problému." };
+}
+
+export function fallbackSeoGeoReport(warningsInput: unknown): SeoGeoReport {
+  const warnings = normalizeSeoGeoWarnings(warningsInput);
+  const seoChecks = [
+    fallbackAuditCheck("Záměr a klíčová slova", warnings, /záměr|klíč|keyword|téma/i),
+    fallbackAuditCheck("Titulek a perex", warnings, /titulek|perex|úvod/i),
+    fallbackAuditCheck("SEO metadata", warnings, /seo title|meta|slug/i),
+    fallbackAuditCheck("Interní odkazy", warnings, /odkaz|plánovač|eurogopass/i),
+  ];
+  const geoChecks = [
+    fallbackAuditCheck("Přímé odpovědi", warnings, /odpověď|perex|úvod/i),
+    fallbackAuditCheck("Struktura a citovatelnost", warnings, /nadpis|h2|h3|sekc|citov/i),
+    fallbackAuditCheck("Fakta a konkrétnost", warnings, /fakt|zdroj|cena|čís|konkrét|podmín/i),
+    fallbackAuditCheck("Jazyk a entity", warnings, /lokaliz|jazyk|zem|trasa|entit/i),
+  ];
+  const average = (checks: SeoGeoCheck[]) => Math.round(checks.reduce((sum, check) => sum + check.score, 0) / checks.length);
+  const seoScore = average(seoChecks); const geoScore = average(geoChecks); const overall = Math.round((seoScore + geoScore) / 2);
+  return { seo_score: seoScore, geo_score: geoScore, summary: overall >= 90 ? "SEO i GEO jsou ve velmi dobrém stavu." : overall >= 75 ? "Článek je dobře připravený, AI ještě eviduje několik možností ke zlepšení." : "Článek potřebuje další automatickou SEO/GEO optimalizaci.", seo_checks: seoChecks, geo_checks: geoChecks };
+}
+
+function normalizeAuditChecks(value: unknown, fallback: SeoGeoCheck[]) {
+  if (!Array.isArray(value) || !value.length) return fallback;
+  return value.slice(0, 6).map(item => {
+    const row = item && typeof item === "object" ? item as Record<string, unknown> : {};
+    return { label: String(row.label ?? "Kontrola").trim().slice(0, 120) || "Kontrola", score: clampAuditScore(row.score, 0), note: String(row.note ?? "").trim().slice(0, 500) || "Bez komentáře." };
+  });
+}
+
+function normalizeSeoGeoReport(value: Record<string, unknown> | undefined, warnings: SeoGeoWarning[]): SeoGeoReport {
+  const fallback = fallbackSeoGeoReport(warnings);
+  const details = value?.details && typeof value.details === "object" ? value.details as Record<string, unknown> : {};
+  return {
+    seo_score: clampAuditScore(value?.seo_score, fallback.seo_score),
+    geo_score: clampAuditScore(value?.geo_score, fallback.geo_score),
+    summary: String(value?.summary ?? fallback.summary).trim().slice(0, 500) || fallback.summary,
+    seo_checks: normalizeAuditChecks(value?.seo_checks ?? details.seo_checks, fallback.seo_checks),
+    geo_checks: normalizeAuditChecks(value?.geo_checks ?? details.geo_checks, fallback.geo_checks),
+  };
+}
+
+function hydratedSeoAudit(record: Record<string, unknown> | null | undefined) {
+  if (!record) return null;
+  const warnings = normalizeSeoGeoWarnings(record.warnings);
+  return { ...record, ...normalizeSeoGeoReport(record, warnings), warnings };
+}
+
+async function saveSeoAudit(postId: string, locale: string, contentHash: string, warnings: unknown, model: string, reportInput?: Record<string, unknown>) {
   const normalized = normalizeSeoGeoWarnings(warnings);
-  await supabase("blog_seo_audits?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ post_id: postId, locale, content_hash: contentHash, warnings: normalized, model, checked_at: new Date().toISOString() }) });
-  return normalized as SeoGeoWarning[];
+  const report = normalizeSeoGeoReport(reportInput, normalized);
+  const checkedAt = new Date().toISOString();
+  const base = { post_id: postId, locale, content_hash: contentHash, warnings: normalized, model, checked_at: checkedAt };
+  const enriched = { ...base, seo_score: report.seo_score, geo_score: report.geo_score, summary: report.summary, details: { seo_checks: report.seo_checks, geo_checks: report.geo_checks } };
+  try {
+    await supabase("blog_seo_audits?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(enriched) });
+  } catch (error) {
+    if (!(error instanceof Error) || !/seo_score|geo_score|summary|details|schema cache|PGRST204/i.test(error.message)) throw error;
+    await supabase("blog_seo_audits?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(base) });
+  }
+  return { ...report, warnings: normalized, content_hash: contentHash, checked_at: checkedAt, model };
 }
 
 async function suggestEditorialTopic() {
@@ -844,7 +957,7 @@ Vytvoř praktický český článek EuroGoPass na téma: ${topic.topic}
 - countries jsou ISO alpha-2 kódy.
 - EuroGoPass zmiň přirozeně v relevantním praktickém kroku a v závěrečném dalším kroku. Použij klikací Markdown odkazy z povoleného katalogu, bez reklamního nátlaku a bez neověřeného slibu.
 - keyword_usage musí obsahovat přesné formulace skutečně přítomné v odpovídajících polích; backend je ověří.
-- Před vrácením interně oprav všechny bezpečně opravitelné SEO/GEO slabiny. seo_geo_warnings použij jen pro problém vyžadující nový fakt nebo ruční rozhodnutí; jinak vrať prázdné pole.${selectedKeywordContext(keywords)}${internalLinkContext("cs")}${guidance ? `\n\n# Doplňkové redakční podklady\n${guidance}` : ""}`;
+- Před vrácením interně oprav všechny bezpečně opravitelné SEO/GEO slabiny. seo_geo_warnings použij jen pro problém vyžadující nový fakt nebo ruční rozhodnutí; jinak vrať prázdné pole.${writingStyleContext(topic.style_profile)}${selectedKeywordContext(keywords)}${internalLinkContext("cs")}${guidance ? `\n\n# Doplňkové redakční podklady\n${guidance}` : ""}`;
     const generated = await openaiResponse(prompt, "eurogopass_article", articleSchema, articleModel, true);
     recordedUsage = aiTokenUsage(generated.raw, articleModel);
     const article: Record<string, unknown> = { ...generated.data, slug: slugify(String(generated.data.slug ?? generated.data.title)) };
@@ -852,7 +965,7 @@ Vytvoř praktický český článek EuroGoPass na téma: ${topic.topic}
     if (mandatoryLinkWarnings.length) throw new Error(`Článek neprošel kontrolou interních odkazů: ${mandatoryLinkWarnings[0].location} – ${mandatoryLinkWarnings[0].message}`);
     const post = (await supabase("blog_posts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
       slug: article.slug, status: "draft", countries: article.countries, tags: article.tags,
-      source_provider: "openai", source_model: articleModel, source_topic: topic.topic,
+      source_provider: "openai", source_model: articleModel, source_topic: topic.topic, style_profile: writingStyle(topic.style_profile),
     }) }) as Array<Record<string, unknown>>)[0];
     if (keywords.length) {
       await supabase("blog_post_keywords?on_conflict=post_id,keyword_id", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(keywords.map((keyword, sortOrder) => ({ post_id: post.id, keyword_id: keyword.id, sort_order: sortOrder }))) });
@@ -866,7 +979,7 @@ Vytvoř praktický český článek EuroGoPass na téma: ${topic.topic}
       slug: article.slug, seo_title: article.seo_title, seo_description: article.seo_description,
       common_revision: 1, local_revision: 0, source_locale: "cs", editorial_status: "ready", content_hash: contentHash,
     }) }) as Array<Record<string, unknown>>)[0];
-    await saveSeoAudit(String(post.id), "cs", contentHash, seoGeoWarnings, articleModel).catch(() => undefined);
+    await saveSeoAudit(String(post.id), "cs", contentHash, seoGeoWarnings, articleModel, article).catch(() => undefined);
     const sources = webSources(generated.raw);
     const storedSources = sources.length ? await supabase("blog_research_sources", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(sources.map(source => ({ post_id: post.id, ...source, trust_level: "unknown" }))) }) as Array<Record<string, unknown>> : [];
     const claims = Array.isArray(article.claims) ? article.claims as Array<Record<string, unknown>> : [];
@@ -915,7 +1028,7 @@ async function drainArticleGenerationQueue() {
   }
 }
 
-async function enqueueArticleGeneration(topicId: string) {
+async function enqueueArticleGeneration(topicId: string, requestedStyle?: unknown) {
   const existing = articleGenerationJobs.get(topicId);
   if (existing) {
     const queueIndex = articleGenerationQueue.findIndex(job => job.topicId === topicId);
@@ -931,7 +1044,7 @@ async function enqueueArticleGeneration(topicId: string) {
   void promise.catch(() => undefined);
   let position = 1;
   const schedule = articleGenerationScheduling.then(async () => {
-    await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(topicId)}`, { method: "PATCH", body: JSON.stringify({ status: "scheduled", last_error: null, updated_at: new Date().toISOString() }) });
+    await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(topicId)}`, { method: "PATCH", body: JSON.stringify({ status: "scheduled", last_error: null, updated_at: new Date().toISOString(), ...(requestedStyle === undefined ? {} : { style_profile: writingStyle(requestedStyle) }) }) });
     articleGenerationQueue.push(job);
     position = articleGenerationQueue.length + (articleGenerationActive ? 1 : 0);
     void drainArticleGenerationQueue();
@@ -1038,7 +1151,7 @@ SEO title: ${source.seo_title ?? ""}
 SEO description: ${source.seo_description ?? ""}
 Slug: ${source.slug ?? ""}
 Obsah:
-${source.body_md}${selectedKeywordContext(keywords)}${locales.map(targetLocale => internalLinkContext(targetLocale, postCountries)).join("\n")}${guidance ? `\n\n# Doplňkové redakční podklady\n${guidance}` : ""}`;
+${source.body_md}${writingStyleContext(post.style_profile)}${selectedKeywordContext(keywords)}${locales.map(targetLocale => internalLinkContext(targetLocale, postCountries)).join("\n")}${guidance ? `\n\n# Doplňkové redakční podklady\n${guidance}` : ""}`;
         const generated = await openaiResponse(prompt, "eurogopass_translations", translationSchema, translationModel, false);
         recordedUsage = aiTokenUsage(generated.raw, translationModel);
         const rows = Array.isArray(generated.data.translations) ? generated.data.translations as Array<Record<string, unknown>> : [];
@@ -1059,7 +1172,7 @@ ${source.body_md}${selectedKeywordContext(keywords)}${locales.map(targetLocale =
             post_id: postId, locale, title: localized.title, excerpt: localized.excerpt, body_md: localized.body_md, slug: localized.slug, seo_title: localized.seo_title, seo_description: localized.seo_description, hero_image_alt: localized.hero_image_alt,
             common_revision: nextRevision, local_revision: 0, source_locale: sourceLocale, manually_edited: false, content_hash: contentHash, save_state: "version", updated_at: new Date().toISOString(),
           }) });
-          await saveSeoAudit(postId, locale, contentHash, seoGeoWarnings, translationModel).catch(() => undefined);
+          await saveSeoAudit(postId, locale, contentHash, seoGeoWarnings, translationModel, localized).catch(() => undefined);
         }
         await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
       } catch (error) {
@@ -1130,7 +1243,7 @@ Meta description: ${String(value.seo_description ?? "")}
 Slug: ${String(value.slug ?? "")}
 Alt text: ${String(value.hero_image_alt ?? "")}
 Obsah:
-${String(value.body_md ?? "")}${selectedKeywordContext(selectedKeywords)}${internalLinkContext(locale, postCountries)}`, "eurogopass_seo_geo_refresh", seoRefreshSchema, articleModel, false);
+${String(value.body_md ?? "")}${writingStyleContext(post?.style_profile)}${selectedKeywordContext(selectedKeywords)}${internalLinkContext(locale, postCountries)}`, "eurogopass_seo_geo_refresh", seoRefreshSchema, articleModel, false);
     recordedUsage = aiTokenUsage(generated.raw, articleModel);
     const revised: Record<string, unknown> = { ...generated.data, slug: slugify(String(generated.data.slug ?? generated.data.title)) };
     const safety = seoRefreshSafety(String(value.body_md ?? ""), String(revised.body_md ?? ""));
@@ -1151,10 +1264,10 @@ ${String(value.body_md ?? "")}${selectedKeywordContext(selectedKeywords)}${inter
     });
     await replacePostKeywords(postId, selectedKeywords, previousKeywords);
     const contentHash = seoContentHash(saved);
-    const warnings = await saveSeoAudit(postId, locale, contentHash, uniqueSeoGeoWarnings([...normalizeSeoGeoWarnings(revised.seo_geo_warnings), ...deterministicWarnings]), articleModel);
+    const audit = await saveSeoAudit(postId, locale, contentHash, uniqueSeoGeoWarnings([...normalizeSeoGeoWarnings(revised.seo_geo_warnings), ...deterministicWarnings]), articleModel, revised);
     await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
     const changes = Array.isArray(revised.changes) ? revised.changes.slice(0, 20) : [];
-    return { updated: true, draft: saved, keywords: selectedKeywords, audit: { warnings, content_hash: contentHash, checked_at: new Date().toISOString() }, changes, preservation: { similarity: Number(safety.similarity.toFixed(4)), length_ratio: Number(safety.lengthRatio.toFixed(4)) } };
+    return { updated: true, draft: saved, keywords: selectedKeywords, audit, changes, preservation: { similarity: Number(safety.similarity.toFixed(4)), length_ratio: Number(safety.lengthRatio.toFixed(4)) } };
   } catch (error) {
     await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "failed", ...generationUsageRecord(recordedUsage), error: error instanceof Error ? error.message : "SEO/GEO aktualizace selhala", finished_at: new Date().toISOString() }) }).catch(() => undefined);
     throw error;
@@ -1171,6 +1284,13 @@ async function runSeoGeoAudit(postId: string, locale: string) {
   try {
     const generated = await openaiResponse(`# Cíl
 Proveď poradní SEO/GEO kontrolu jazykové verze článku EuroGoPass. Najdi jen konkrétní problém, který má redaktor skutečně opravit.
+
+# Skóre a přehled
+- Ohodnoť SEO a GEO samostatně na škále 0–100. Skóre 90+ znamená výborný stav bez důležité opravitelné slabiny; 75–89 dobrý stav; 60–74 prostor ke zlepšení; pod 60 významný problém.
+- SEO score hodnotí hledaný záměr, titulek, perex, metadata, slug, přirozené fráze a interní prolinkování.
+- GEO score hodnotí přímé odpovědi, konkrétní entity a podmínky, strukturu H2/H3, samostatnou citovatelnost pasáží, faktickou jasnost a nativní lokalizaci.
+- Vrať 3 až 6 stručných kontrol pro SEO i GEO. Každá má vlastní score a jedno konkrétní vysvětlení v češtině.
+- summary je jedna krátká česká věta shrnující celkový stav. Procenta nesnižuj jen za stylistickou preferenci bez dopadu.
 
 # Posuzuj
 - shodu tématu, titulku, první věty perexu, SEO title, meta description, slugu a úvodu se stejným uživatelským záměrem;
@@ -1190,11 +1310,12 @@ SEO title: ${value.seo_title ?? ""}
 Meta description: ${value.seo_description ?? ""}
 Slug: ${value.slug ?? ""}
 Obsah:
-${value.body_md ?? ""}${selectedKeywordContext(keywords)}${internalLinkContext(locale, postCountries)}`, "eurogopass_seo_geo_audit", seoAuditSchema, utilityModel, false);
+${value.body_md ?? ""}${writingStyleContext(post?.style_profile)}${selectedKeywordContext(keywords)}${internalLinkContext(locale, postCountries)}`, "eurogopass_seo_geo_audit", seoAuditSchema, utilityModel, false);
     recordedUsage = aiTokenUsage(generated.raw, utilityModel);
-    const warnings = await saveSeoAudit(postId, locale, contentHash, uniqueSeoGeoWarnings([...normalizeSeoGeoWarnings(generated.data.warnings), ...deterministicSeoGeoWarnings(value, { locale, countries: postCountries })]), utilityModel);
+    const allWarnings = uniqueSeoGeoWarnings([...normalizeSeoGeoWarnings(generated.data.warnings), ...deterministicSeoGeoWarnings(value, { locale, countries: postCountries })]);
+    const audit = await saveSeoAudit(postId, locale, contentHash, allWarnings, utilityModel, generated.data);
     await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "completed", ...generationUsageRecord(recordedUsage), finished_at: new Date().toISOString() }) });
-    return { warnings, content_hash: contentHash, checked_at: new Date().toISOString() };
+    return audit;
   } catch (error) {
     await supabase(`blog_generation_runs?id=eq.${runId}`, { method: "PATCH", body: JSON.stringify({ status: "failed", ...generationUsageRecord(recordedUsage), error: error instanceof Error ? error.message : "SEO/GEO kontrola selhala", finished_at: new Date().toISOString() }) }).catch(() => undefined);
     throw error;
@@ -1332,21 +1453,14 @@ export function editorialApi(actorEmail: (req: import("node:http").IncomingMessa
             return json(res, 201, { topic: await createSuggestedTopic() });
           }
           const deleteTopicMatch = route.match(/^\/topics\/([^/]+)$/);
-          if (method === "PATCH" && deleteTopicMatch) {
-            const body = await readBody(req);
-            const topic = String(body.topic ?? "").trim();
-            if (!topic || topic.length > 500) throw Object.assign(new Error("Téma musí mít 1 až 500 znaků"), { status: 400 });
-            const rows = await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(decodeURIComponent(deleteTopicMatch[1]))}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ topic, updated_at: new Date().toISOString() }) }) as Array<Record<string, unknown>>;
-            if (!rows[0]) throw Object.assign(new Error("Téma nebylo nalezeno"), { status: 404 });
-            return json(res, 200, { topic: { ...rows[0], keywords: await topicKeywordRows(String(rows[0].id)) } });
-          }
           if (method === "DELETE" && deleteTopicMatch) {
             await supabase(`blog_topic_queue?id=eq.${encodeURIComponent(decodeURIComponent(deleteTopicMatch[1]))}`, { method: "DELETE" });
             return json(res, 200, { deleted: true });
           }
           const generateMatch = route.match(/^\/topics\/([^/]+)\/generate$/);
           if (method === "POST" && generateMatch) {
-            const queued = await enqueueArticleGeneration(decodeURIComponent(generateMatch[1]));
+            const body = await readBody(req);
+            const queued = await enqueueArticleGeneration(decodeURIComponent(generateMatch[1]), requestedWritingStyle(body.styleProfile));
             return json(res, 202, { queued: true, position: queued.position, alreadyQueued: queued.alreadyQueued });
           }
           const saveMatch = route.match(/^\/articles\/([^/]+)\/locales\/([^/]+)$/);
@@ -1354,7 +1468,7 @@ export function editorialApi(actorEmail: (req: import("node:http").IncomingMessa
           const seoAuditMatch = route.match(/^\/articles\/([^/]+)\/locales\/([^/]+)\/seo-audit$/);
           if (seoAuditMatch && method === "GET") {
             const context = await seoAuditContext(decodeURIComponent(seoAuditMatch[1]), decodeURIComponent(seoAuditMatch[2]));
-            return json(res, 200, { keywords: context.keywords, audit: context.audit, stale: Boolean(context.audit && context.audit.content_hash !== context.contentHash) });
+            return json(res, 200, { keywords: context.keywords, audit: hydratedSeoAudit(context.audit), stale: Boolean(context.audit && context.audit.content_hash !== context.contentHash) });
           }
           if (seoAuditMatch && method === "POST") return json(res, 200, { audit: await runSeoGeoAudit(decodeURIComponent(seoAuditMatch[1]), decodeURIComponent(seoAuditMatch[2])) });
           const seoRefreshMatch = route.match(/^\/articles\/([^/]+)\/locales\/([^/]+)\/seo-refresh$/);

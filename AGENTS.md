@@ -18,6 +18,10 @@ Správa AI podkladů smí vytvářet, upravovat, zapínat, vypínat a mazat pouz
 
 SEO/GEO pool smí importovat ručně vložené výrazy a CSV exporty Google Search Console pouze do redakčních tabulek `blog_seo_keywords`, `blog_topic_keywords`, `blog_post_keywords` a `blog_seo_audits`. Smí aktualizovat pouze redakční metriky, vazby témat a článků na klíčová slova a neblokující výsledky redakční kontroly. Nesmí zapisovat do Google Search Console, obchodních tabulek ani jiných produkčních zdrojů.
 
+SEO/GEO kontrola smí v `blog_seo_audits` ukládat samostatné poradní skóre SEO a GEO 0–100, krátký souhrn a strukturované dílčí kontroly. Skóre je pouze informační, nesmí automaticky publikovat ani blokovat ruční publikaci.
+
+Volba stylu článku smí před generováním uložit pouze jednu z povolených hodnot `balanced`, `factual` nebo `roadmate` do `blog_topic_queue.style_profile` a následně ji zkopírovat do `blog_posts.style_profile`. Hodnota smí sloužit výhradně jako redakční kontext pro tvorbu, překlady a pozdější optimalizaci článku.
+
 Ruční SEO/GEO aktualizace přes `POST /api/editorial/articles/:id/locales/:locale/seo-refresh` smí pro zadaný článek znovu vybrat výrazy z redakčního poolu, nahradit pouze jeho vazby v `blog_post_keywords`, vytvořit novou konceptovou revizi dané jazykové verze v `blog_translation_drafts`, uložit generační audit do `blog_generation_runs` a obnovit kontrolu v `blog_seo_audits`. Musí zachovat fakta a podstatnou část původního textu, nesmí sama publikovat ani měnit obchodní data. Překlady se po této změně smějí aktualizovat pouze stávajícím redakčním překladovým tokem.
 
 Mimo tyto tři výjimky se nesmí v Supabase ani jiném produkčním zdroji nic vytvářet, měnit ani mazat. To zahrnuje zejména objednávky, jejich položky, platby, zákaznická data, dokumenty a fulfillment data. Filtrování, párování, deduplikace a skrývání objednávek musí probíhat pouze při čtení nebo v UI, nikdy zápisem do produkční databáze.

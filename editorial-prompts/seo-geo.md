@@ -66,3 +66,13 @@ Před odevzdáním výsledek interně oprav, dokud platí:
 Do `keyword_usage` uveď primární záměr a přesné neprázdné formulace skutečně přítomné v titulku, perexu, SEO title, meta description a těle. Nevymýšlej formulaci, která ve výsledném poli není; backend její přítomnost ověřuje.
 
 Do `seo_geo_warnings` vrať pouze problém, který nelze bezpečně opravit bez nového faktu nebo redakčního rozhodnutí. Opravitelné stylistické a strukturální slabiny nejprve oprav přímo ve výstupu.
+
+## Nezávislé hodnocení SEO a GEO
+
+Pokud výstupní formát požaduje skóre, ohodnoť hotovou jazykovou verzi ve dvou nezávislých osách od 0 do 100. Skóre nesmí být kosmetické ani automaticky vysoké: 90–100 znamená výborný stav bez významné slabiny, 75–89 dobrý stav s drobným prostorem ke zlepšení, 60–74 použitelný stav s viditelnými rezervami a méně než 60 závažnější nedostatky.
+
+- `seo_score` hodnotí shodu se záměrem hledání, titulek, perex, SEO title, meta description, slug, strukturu nadpisů, přirozené pokrytí klíčových témat, interní odkazy a čitelnost.
+- `geo_score` hodnotí přímé odpovědi, jednoznačné entity a kontext, faktickou přesnost a oporu ve zdrojích, samostatnou srozumitelnost sekcí, citovatelnost pro AI a praktickou využitelnost.
+- `summary` je jedna krátká česká věta vystihující celkový stav a nejdůležitější prioritu. Je určena pro interní české rozhraní i při hodnocení cizojazyčné verze.
+- `seo_checks` a `geo_checks` obsahují vždy 3 až 6 konkrétních oblastí. Každá má krátký český název, vlastní skóre a jednu stručnou českou poznámku založenou na skutečném výsledku.
+- Varování a dílčí kontroly se musí promítnout do skóre. Výstup se závažným varováním nesmí získat neodůvodněně vysoké hodnocení.
