@@ -276,6 +276,7 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
   const [guideState, setGuideState] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [guideSetupRequired, setGuideSetupRequired] = useState(false);
   const [expandedGuideId, setExpandedGuideId] = useState("");
+  const [primaryExpanded, setPrimaryExpanded] = useState(false);
   const [message, setMessage] = useState("");
   const [guideMessage, setGuideMessage] = useState("");
   const primaryGuide = guides.find(guide => isPrimaryGuide(guide.filename));
@@ -355,7 +356,10 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Podklad se nepodařilo odstranit");
       setGuides(current => current.filter(item => item.id !== guide.id));
-      if (isPrimaryGuide(guide.filename)) setPrimaryDraft(defaultEditorPrompt);
+      if (isPrimaryGuide(guide.filename)) {
+        setPrimaryDraft(defaultEditorPrompt);
+        setPrimaryExpanded(false);
+      }
       setExpandedGuideId(current => current === guide.id ? "" : current);
       setGuideState("ready");
     } catch (error) { setGuideState("error"); setGuideMessage(error instanceof Error ? error.message : "Podklad se nepodařilo odstranit."); }
@@ -388,11 +392,21 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
                   <h3>Hlavní prompt</h3>
                   <p>Základní instrukce redaktora. Ukládá se jako <code>{primaryGuideFilename}</code>.</p>
                 </div>
-                {primaryGuide && <button className="editorial-guide-delete" type="button" aria-label="Smazat hlavní prompt" title="Smazat hlavní prompt" disabled={guideState === "saving"} onClick={() => void deleteGuide(primaryGuide)}><X size={16} /></button>}
               </header>
-              <div className="editorial-guide-primary-editor">
-                <textarea aria-label="Hlavní redaktorský prompt" value={primaryContent} maxLength={20000} spellCheck={false} disabled={state === "loading" || guideState === "saving"} onChange={event => updatePrimaryContent(event.target.value)} />
-                <small>{primaryContent.length.toLocaleString("cs-CZ")} / 20 000 znaků{primaryGuide ? "" : " · při uložení se vytvoří editor-prompt.md"}</small>
+              <div className="editorial-guide-list">
+                <article className={primaryExpanded ? "expanded primary" : "primary"}>
+                  <div className="editorial-guide-row">
+                    <button className="editorial-guide-view" type="button" onClick={() => setPrimaryExpanded(current => !current)} aria-expanded={primaryExpanded}>
+                      <span>{primaryGuideFilename}{primaryGuide ? "" : " · nový"}</span>
+                      <ChevronDown size={17} />
+                    </button>
+                    {primaryGuide && <button className="editorial-guide-delete" type="button" aria-label="Smazat hlavní prompt" title="Smazat hlavní prompt" disabled={guideState === "saving"} onClick={() => void deleteGuide(primaryGuide)}><X size={16} /></button>}
+                  </div>
+                  {primaryExpanded && <div className="editorial-guide-preview editorial-guide-primary-editor">
+                    <textarea aria-label="Hlavní redaktorský prompt" value={primaryContent} maxLength={20000} spellCheck={false} disabled={state === "loading" || guideState === "saving"} onChange={event => updatePrimaryContent(event.target.value)} />
+                    <small>{primaryContent.length.toLocaleString("cs-CZ")} / 20 000 znaků{primaryGuide ? "" : " · při uložení se vytvoří editor-prompt.md"}</small>
+                  </div>}
+                </article>
               </div>
             </section>
             <section className="editorial-guide-supplements">
