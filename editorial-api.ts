@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { loadServerEnvironment } from "./server-config";
+import { languagesNeedSync, localesNeedingSync, nextLocalRevision } from "./src/editorial-versioning";
+
+export { languagesNeedSync, localesNeedingSync, nextLocalRevision };
 
 type Environment = Record<string, string | undefined>;
 
@@ -201,7 +204,12 @@ function hashContent(value: string) {
 }
 
 export function seoContentHash(value: Record<string, unknown>) {
-  return hashContent(["title", "excerpt", "seo_title", "seo_description", "slug", "body_md"].map(field => `${field}:${String(value[field] ?? "").trim()}`).join("\n\n"));
+  return hashContent(["title", "excerpt", "seo_title", "seo_description", "slug", "body_md", "hero_image_alt"].map(field => `${field}:${String(value[field] ?? "").trim()}`).join("\n\n"));
+}
+
+export function editorialContentChanged(previous: Record<string, unknown> | null | undefined, next: Record<string, unknown>) {
+  if (!previous) return true;
+  return seoContentHash(previous) !== seoContentHash(next);
 }
 
 export function articleLengthRange(targetCharacters: number) {
@@ -1052,14 +1060,15 @@ async function saveDraft(postId: string, locale: string, body: Record<string, un
   if (title.length > 300 || excerpt.length > 2_000 || bodyMd.length > 200_000) throw Object.assign(new Error("Text překračuje povolenou délku"), { status: 400 });
   const current = (await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}&locale=eq.${encodeURIComponent(locale)}&select=*`) as Array<Record<string, unknown>>)[0];
   const isVersion = body.saveMode === "version";
-  const localRevision = body.resetLocalRevision === true ? 0 : Number(current?.local_revision ?? body.local_revision ?? 0) + (isVersion ? 1 : 0);
+  const nextContent = { title, excerpt, body_md: bodyMd, slug: slugify(String(body.slug ?? body.title ?? "")), seo_title: String(body.seo_title ?? ""), seo_description: String(body.seo_description ?? ""), hero_image_alt: String(body.hero_image_alt ?? "") };
+  const contentChanged = editorialContentChanged(current, nextContent);
+  const localRevision = nextLocalRevision(current?.local_revision ?? body.local_revision, { saveMode: body.saveMode, resetLocalRevision: body.resetLocalRevision, contentChanged });
   const record = {
     post_id: postId, locale,
-    title, excerpt, body_md: bodyMd,
-    slug: slugify(String(body.slug ?? body.title ?? "")), seo_title: String(body.seo_title ?? ""), seo_description: String(body.seo_description ?? ""), hero_image_alt: String(body.hero_image_alt ?? ""),
+    ...nextContent,
     common_revision: Number(body.common_revision ?? 1), local_revision: localRevision,
     source_locale: String(body.source_locale ?? locale), manually_edited: true,
-    content_hash: seoContentHash({ ...body, title, excerpt, body_md: bodyMd }), save_state: isVersion ? "version" : "autosave", updated_at: new Date().toISOString(),
+    content_hash: seoContentHash(nextContent), save_state: isVersion ? "version" : "autosave", updated_at: new Date().toISOString(),
   };
   const saved = await supabase("blog_translation_drafts?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(record) }) as Array<Record<string, unknown>>;
   return saved[0];
@@ -1477,7 +1486,16 @@ ${value.body_md ?? ""}${writingStyleContext(post?.style_profile)}${selectedKeywo
 async function publishArticle(postId: string, publishedBy: string) {
   const drafts = await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(postId)}&select=*`) as Array<Record<string, unknown>>;
   for (const draft of drafts) {
-    const record = { ...draft, id: undefined, save_state: undefined, created_at: undefined, updated_at: new Date().toISOString(), editorial_status: "published", last_published_at: new Date().toISOString() };
+    const record = {
+      ...draft,
+      id: undefined,
+      save_state: undefined,
+      created_at: undefined,
+      local_revision: 0,
+      updated_at: new Date().toISOString(),
+      editorial_status: "published",
+      last_published_at: new Date().toISOString(),
+    };
     await supabase("blog_post_translations?on_conflict=post_id,locale", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(record) });
   }
   await supabase(`blog_posts?id=eq.${encodeURIComponent(postId)}`, { method: "PATCH", body: JSON.stringify({ status: "published", published_at: new Date().toISOString(), published_by: publishedBy, updated_at: new Date().toISOString() }) });

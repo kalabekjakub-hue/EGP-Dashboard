@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
+import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -123,6 +123,36 @@ test("SEO audit hash becomes stale when metadata changes", () => {
   const base = { title: "Rakouská dálniční známka", excerpt: "Přímá odpověď", seo_title: "Rakouská dálniční známka pro cestu autem", seo_description: "Popis", slug: "rakouska-dalnicni-znamka", body_md: "Obsah" };
   assert.notEqual(seoContentHash(base), seoContentHash({ ...base, excerpt: "Změněná přímá odpověď" }));
   assert.notEqual(seoContentHash(base), seoContentHash({ ...base, seo_description: "Změněný SEO popis" }));
+});
+
+test("version save bumps local revision only when content actually changed", () => {
+  const draft = { title: "Titulek", excerpt: "Perex", body_md: "Text", slug: "titulek", seo_title: "SEO", seo_description: "Popis", hero_image_alt: "Alt" };
+  assert.equal(editorialContentChanged(draft, draft), false);
+  assert.equal(editorialContentChanged(draft, { ...draft, body_md: "Jiný text" }), true);
+  assert.equal(nextLocalRevision(0, { saveMode: "version", contentChanged: false }), 0);
+  assert.equal(nextLocalRevision(0, { saveMode: "version", contentChanged: true }), 1);
+  assert.equal(nextLocalRevision(2, { saveMode: "autosave", contentChanged: true }), 2);
+  assert.equal(nextLocalRevision(2, { saveMode: "version", resetLocalRevision: true, contentChanged: true }), 0);
+});
+
+test("language sync warning ignores published-only articles and hero-only changes", () => {
+  assert.equal(languagesNeedSync([
+    { locale: "cs", common_revision: 2, local_revision: 1, hasDraft: false },
+    { locale: "en", common_revision: 2, local_revision: 0, hasDraft: false },
+  ]), false);
+  assert.equal(languagesNeedSync([
+    { locale: "cs", common_revision: 2, local_revision: 0, hasDraft: true },
+    { locale: "en", common_revision: 2, local_revision: 0, hasDraft: true },
+  ]), false);
+  assert.equal(languagesNeedSync([
+    { locale: "cs", common_revision: 2, local_revision: 1, hasDraft: true },
+    { locale: "en", common_revision: 2, local_revision: 0, hasDraft: true },
+  ]), true);
+  assert.deepEqual(localesNeedingSync([
+    { locale: "cs", common_revision: 2, local_revision: 1, hasDraft: true },
+    { locale: "en", common_revision: 2, local_revision: 0, hasDraft: true },
+    { locale: "de", common_revision: 1, local_revision: 0, hasDraft: true },
+  ]), ["cs", "de"]);
 });
 
 test("SEO/GEO fallback report keeps the two quality dimensions independent", () => {
