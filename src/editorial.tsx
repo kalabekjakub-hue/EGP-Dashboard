@@ -231,16 +231,61 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
   </main>;
 }
 
+const primaryGuideFilename = "editor-prompt.md";
+const defaultEditorPrompt = `# Hlavní prompt redaktora EuroGoPass
+
+Jsi redaktor EuroGoPass. Připravuješ praktické články o cestování autem, dálničních známkách a mýtném pro běžné evropské řidiče.
+
+## Tvůj úkol
+
+- Odpověz přímo na otázku čtenáře, potom vysvětli podmínky a výjimky.
+- Ověřuj proměnlivá fakta z aktuálních důvěryhodných zdrojů. Nic nevymýšlej.
+- Piš srozumitelně, konkrétně a bez výplně.
+- Připrav text tak, aby čtenář věděl, co se týká jeho trasy nebo vozidla a co má udělat dál.
+- Drž se zvoleného stylového profilu (\`balanced\`, \`factual\` nebo \`roadmate\`) jako komunikačního odstínu.
+- Detailní hlas, strukturu, terminologii, co zmiňovat i nezmiňovat a roli EuroGoPass ber z ostatních aktivních redakčních Markdown podkladů.
+
+## Jak pracovat s podklady
+
+Tento dokument je hlavní redaktorský prompt. Ostatní aktivní Markdown soubory jsou doplňky pro doladění stylu, značky, struktury a faktických redakčních pravidel.
+
+Pokud se doplňky překrývají, preferuj konkrétnější praktickou instrukci. Pokud je instrukce v konfliktu s ověřeným faktem, jasností nebo bezpečnostními pravidly systému, má přednost fakt, jasnost a bezpečnost.
+
+## Výsledek
+
+Vrácený článek musí být praktický, fakticky opatrný, dobře strukturovaný a připravený k redakční kontrole. SEO metadata a odkazy musí odpovídat skutečnému obsahu. EuroGoPass představuj jako užitečné řešení cesty, nikdy jako oficiální státní portál.`;
+
+function isPrimaryGuide(filename: string) {
+  return filename.trim().toLowerCase() === primaryGuideFilename;
+}
+
+function sortGuides(rows: EditorialGuide[]) {
+  return [...rows].sort((left, right) => {
+    const leftPrimary = isPrimaryGuide(left.filename);
+    const rightPrimary = isPrimaryGuide(right.filename);
+    if (leftPrimary !== rightPrimary) return leftPrimary ? -1 : 1;
+    return left.filename.localeCompare(right.filename, "en");
+  });
+}
+
 export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<EditorialSettings>({ enabled: false, drafts_per_day: 2, max_pending_reviews: 10, generation_hour: 7, autosave_enabled: true });
   const [guides, setGuides] = useState<EditorialGuide[]>([]);
+  const [primaryDraft, setPrimaryDraft] = useState(defaultEditorPrompt);
   const [state, setState] = useState<"loading" | "ready" | "saving" | "saved" | "error">("loading");
   const [guideState, setGuideState] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [guideSetupRequired, setGuideSetupRequired] = useState(false);
   const [expandedGuideId, setExpandedGuideId] = useState("");
   const [message, setMessage] = useState("");
   const [guideMessage, setGuideMessage] = useState("");
-  const guidesEnabled = guides.length > 0 && guides.every(guide => guide.enabled);
+  const primaryGuide = guides.find(guide => isPrimaryGuide(guide.filename));
+  const supplementGuides = guides.filter(guide => !isPrimaryGuide(guide.filename));
+  const guidesEnabled = guides.length > 0 ? guides.every(guide => guide.enabled) : true;
+  const primaryContent = primaryGuide?.content ?? primaryDraft;
+  const updatePrimaryContent = (content: string) => {
+    if (primaryGuide) setGuides(current => current.map(item => item.id === primaryGuide.id ? { ...item, content, filename: primaryGuideFilename } : item));
+    else setPrimaryDraft(content);
+  };
   useEffect(() => {
     void Promise.all([fetch("/api/editorial/settings"), fetch("/api/editorial/guides")])
       .then(async ([settingsResponse, guidesResponse]) => {
@@ -248,7 +293,10 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
         const settingsPayload = await settingsResponse.json() as { settings?: EditorialSettings | null };
         const guidesPayload = await guidesResponse.json() as { guides?: EditorialGuide[]; setupRequired?: boolean };
         if (settingsPayload.settings) setSettings(settingsPayload.settings);
-        setGuides(guidesPayload.guides ?? []);
+        const loaded = sortGuides(guidesPayload.guides ?? []);
+        setGuides(loaded);
+        const existingPrimary = loaded.find(guide => isPrimaryGuide(guide.filename));
+        if (!existingPrimary) setPrimaryDraft(defaultEditorPrompt);
         setGuideSetupRequired(guidesPayload.setupRequired === true);
         setState("ready"); setGuideState("ready");
       })
@@ -257,20 +305,26 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
   const save = async () => {
     setState("saving"); setGuideState("saving"); setMessage(""); setGuideMessage("");
     try {
-      const [settingsResponse, ...guideResponses] = await Promise.all([
-        fetch("/api/editorial/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) }),
-        ...guides.map(guide => fetch(`/api/editorial/guides/${guide.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: guide.filename, content: guide.content, enabled: guide.enabled }) })),
-      ]);
+      const settingsResponse = await fetch("/api/editorial/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
       const settingsPayload = await settingsResponse.json() as { settings?: EditorialSettings; error?: string };
       if (!settingsResponse.ok) throw new Error(settingsPayload.error);
       const savedGuides: EditorialGuide[] = [];
-      for (const response of guideResponses) {
+      if (!primaryGuide) {
+        const draft = primaryDraft.trim();
+        if (!draft) throw new Error("Hlavní prompt nesmí být prázdný");
+        const createResponse = await fetch("/api/editorial/guides", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: primaryGuideFilename, content: draft, enabled: guidesEnabled }) });
+        const createPayload = await createResponse.json() as { guide?: EditorialGuide; error?: string };
+        if (!createResponse.ok || !createPayload.guide) throw new Error(createPayload.error ?? "Hlavní prompt se nepodařilo vytvořit");
+        savedGuides.push(createPayload.guide);
+      }
+      for (const guide of guides) {
+        const response = await fetch(`/api/editorial/guides/${guide.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: isPrimaryGuide(guide.filename) ? primaryGuideFilename : guide.filename, content: guide.content, enabled: guide.enabled }) });
         const payload = await response.json() as { guide?: EditorialGuide; error?: string };
         if (!response.ok || !payload.guide) throw new Error(payload.error ?? "Podklad se nepodařilo uložit");
         savedGuides.push(payload.guide);
       }
       if (settingsPayload.settings) setSettings(settingsPayload.settings);
-      setGuides(savedGuides.sort((a, b) => a.filename.localeCompare(b.filename, "cs")));
+      setGuides(sortGuides(savedGuides));
       setState("saved"); setGuideState("ready"); setMessage("");
       window.setTimeout(() => setState(current => current === "saved" ? "ready" : current), 1800);
     } catch (error) { setState("error"); setGuideState("error"); setMessage(error instanceof Error ? error.message : "Nastavení se nepodařilo uložit."); }
@@ -282,23 +336,26 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
       const created: EditorialGuide[] = [];
       for (const file of selected) {
         if (!file.name.toLowerCase().endsWith(".md")) throw new Error(`${file.name}: podporované jsou pouze soubory .md`);
+        if (isPrimaryGuide(file.name) && primaryGuide) throw new Error("Hlavní prompt už existuje. Uprav ho přímo v sekci Hlavní prompt.");
         const response = await fetch("/api/editorial/guides", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, content: await file.text(), enabled: guidesEnabled }) });
         const payload = await response.json() as { guide?: EditorialGuide; error?: string };
         if (!response.ok || !payload.guide) throw new Error(payload.error ?? `${file.name} se nepodařilo nahrát`);
         created.push(payload.guide);
       }
-      setGuides(current => [...current, ...created].sort((a, b) => a.filename.localeCompare(b.filename, "cs")));
+      setGuides(current => sortGuides([...current.filter(guide => !created.some(item => isPrimaryGuide(item.filename) && isPrimaryGuide(guide.filename))), ...created]));
       setGuideState("ready");
     } catch (error) { setGuideState("error"); setGuideMessage(error instanceof Error ? error.message : "Podklady se nepodařilo nahrát."); }
   };
   const deleteGuide = async (guide: EditorialGuide) => {
-    if (!window.confirm(`Odstranit podklad „${guide.filename}“?`)) return;
+    const label = isPrimaryGuide(guide.filename) ? "hlavní prompt" : `podklad „${guide.filename}“`;
+    if (!window.confirm(`Odstranit ${label}?`)) return;
     setGuideState("saving"); setGuideMessage("");
     try {
       const response = await fetch(`/api/editorial/guides/${guide.id}`, { method: "DELETE" });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Podklad se nepodařilo odstranit");
       setGuides(current => current.filter(item => item.id !== guide.id));
+      if (isPrimaryGuide(guide.filename)) setPrimaryDraft(defaultEditorPrompt);
       setExpandedGuideId(current => current === guide.id ? "" : current);
       setGuideState("ready");
     } catch (error) { setGuideState("error"); setGuideMessage(error instanceof Error ? error.message : "Podklad se nepodařilo odstranit."); }
@@ -307,7 +364,7 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
     <section className="editorial-settings-dialog surface" role="dialog" aria-modal="true" aria-labelledby="editorial-settings-title" onMouseDown={event => event.stopPropagation()}>
       <button className="editorial-settings-close" onClick={onClose} aria-label="Zavřít nastavení">×</button>
       <h2 id="editorial-settings-title">Nastavení Redakce</h2>
-      <p>Automatizace a interní Markdown podklady pro AI.</p>
+      <p>Automatizace, hlavní prompt a doplňkové Markdown podklady pro AI.</p>
       <div className="editorial-settings-columns">
         <section>
           <header className="editorial-settings-section-title"><h3>Automatizace článků</h3></header>
@@ -318,25 +375,47 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
             <div className="editorial-settings-switches">
               <label><span>Automatické generování</span><input type="checkbox" checked={settings.enabled} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, enabled: event.target.checked }))} /></label>
               <label><span>Automatické ukládání</span><input type="checkbox" checked={settings.autosave_enabled} disabled={state === "loading" || state === "saving"} onChange={event => setSettings(current => ({ ...current, autosave_enabled: event.target.checked }))} /></label>
-              <label><span>Podklady</span><input type="checkbox" checked={guidesEnabled} disabled={guideState === "saving" || !guides.length} onChange={event => setGuides(current => current.map(guide => ({ ...guide, enabled: event.target.checked })))} /></label>
+              <label><span>Podklady</span><input type="checkbox" checked={guidesEnabled} disabled={guideState === "saving" || (!guides.length && !primaryDraft.trim())} onChange={event => setGuides(current => current.map(guide => ({ ...guide, enabled: event.target.checked })))} /></label>
             </div>
           </section>
           {message && state === "error" && <div className="editorial-message error"><AlertTriangle size={17} />{message}</div>}
         </section>
         <section className="editorial-guide-settings">
-          <header className="editorial-settings-section-title">
-            <div><h3>Podklady</h3><p>Hlavní prompt je <code>editor-prompt.md</code>. Ostatní aktivní .md soubory ho doladí.</p></div>
-            <label className="editorial-guide-upload">Nahrát .md<input type="file" accept=".md,text/markdown" multiple disabled={guideState === "saving" || guideSetupRequired} onChange={event => { void uploadGuides(event.target.files); event.target.value = ""; }} /></label>
-          </header>
-          {guideSetupRequired ? <div className="editorial-guide-empty error">Nejdřív je potřeba aplikovat migraci pro AI podklady.</div> : guides.length ? <div className="editorial-guide-list">{[...guides].sort((left, right) => {
-            const leftPrimary = left.filename.trim().toLowerCase() === "editor-prompt.md";
-            const rightPrimary = right.filename.trim().toLowerCase() === "editor-prompt.md";
-            if (leftPrimary !== rightPrimary) return leftPrimary ? -1 : 1;
-            return left.filename.localeCompare(right.filename, "en");
-          }).map(guide => {
-            const primary = guide.filename.trim().toLowerCase() === "editor-prompt.md";
-            return <article className={expandedGuideId === guide.id ? "expanded" : ""} key={guide.id}><div className="editorial-guide-row"><button className="editorial-guide-view" onClick={() => setExpandedGuideId(current => current === guide.id ? "" : guide.id)} aria-expanded={expandedGuideId === guide.id}><span>{guide.filename}{primary ? " · hlavní prompt" : ""}</span><ChevronDown size={17} /></button><button className="editorial-guide-delete" aria-label={`Smazat ${guide.filename}`} title="Smazat podklad" disabled={guideState === "saving"} onClick={() => void deleteGuide(guide)}><X size={16} /></button></div>{expandedGuideId === guide.id && <div className="editorial-guide-preview"><label><span>Název souboru</span><input aria-label="Název Markdown podkladu" value={guide.filename} maxLength={120} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, filename: event.target.value } : item))} /></label><textarea value={guide.content} maxLength={20000} spellCheck={false} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, content: event.target.value } : item))} /><small>{guide.content.length.toLocaleString("cs-CZ")} / 20 000 znaků{primary ? " · tento soubor je hlavní redaktorský prompt" : ""}</small></div>}</article>;
-          })}</div> : <div className="editorial-guide-empty">Zatím nejsou nahrané žádné podklady. Začni hlavním promptem editor-prompt.md a doplň writing-style.md, brand-context.md, article-structure.md a editorial-rules.md.</div>}
+          {guideSetupRequired ? <div className="editorial-guide-empty error">Nejdřív je potřeba aplikovat migraci pro AI podklady.</div> : <>
+            <section className="editorial-guide-primary">
+              <header className="editorial-settings-section-title">
+                <div>
+                  <h3>Hlavní prompt</h3>
+                  <p>Základní instrukce redaktora. Ukládá se jako <code>{primaryGuideFilename}</code>.</p>
+                </div>
+                {primaryGuide && <button className="editorial-guide-delete" type="button" aria-label="Smazat hlavní prompt" title="Smazat hlavní prompt" disabled={guideState === "saving"} onClick={() => void deleteGuide(primaryGuide)}><X size={16} /></button>}
+              </header>
+              <div className="editorial-guide-primary-editor">
+                <textarea aria-label="Hlavní redaktorský prompt" value={primaryContent} maxLength={20000} spellCheck={false} disabled={state === "loading" || guideState === "saving"} onChange={event => updatePrimaryContent(event.target.value)} />
+                <small>{primaryContent.length.toLocaleString("cs-CZ")} / 20 000 znaků{primaryGuide ? "" : " · při uložení se vytvoří editor-prompt.md"}</small>
+              </div>
+            </section>
+            <section className="editorial-guide-supplements">
+              <header className="editorial-settings-section-title">
+                <div>
+                  <h3>Doplňkové podklady</h3>
+                  <p>Styl, značka, struktura a další doladění hlavního promptu.</p>
+                </div>
+                <label className="editorial-guide-upload">Nahrát .md<input type="file" accept=".md,text/markdown" multiple disabled={guideState === "saving"} onChange={event => { void uploadGuides(event.target.files); event.target.value = ""; }} /></label>
+              </header>
+              {supplementGuides.length ? <div className="editorial-guide-list">{supplementGuides.map(guide => <article className={expandedGuideId === guide.id ? "expanded" : ""} key={guide.id}>
+                <div className="editorial-guide-row">
+                  <button className="editorial-guide-view" type="button" onClick={() => setExpandedGuideId(current => current === guide.id ? "" : guide.id)} aria-expanded={expandedGuideId === guide.id}><span>{guide.filename}</span><ChevronDown size={17} /></button>
+                  <button className="editorial-guide-delete" type="button" aria-label={`Smazat ${guide.filename}`} title="Smazat podklad" disabled={guideState === "saving"} onClick={() => void deleteGuide(guide)}><X size={16} /></button>
+                </div>
+                {expandedGuideId === guide.id && <div className="editorial-guide-preview">
+                  <label><span>Název souboru</span><input aria-label="Název Markdown podkladu" value={guide.filename} maxLength={120} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, filename: event.target.value } : item))} /></label>
+                  <textarea value={guide.content} maxLength={20000} spellCheck={false} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, content: event.target.value } : item))} />
+                  <small>{guide.content.length.toLocaleString("cs-CZ")} / 20 000 znaků</small>
+                </div>}
+              </article>)}</div> : <div className="editorial-guide-empty">Zatím žádné doplňky. Nahraj například writing-style.md, brand-context.md, article-structure.md nebo editorial-rules.md.</div>}
+            </section>
+          </>}
           {guideMessage && <div className="editorial-message error"><AlertTriangle size={17} />{guideMessage}</div>}
         </section>
       </div>
