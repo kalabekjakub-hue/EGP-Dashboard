@@ -43,7 +43,7 @@ Nevytvářej dlouhý seznam málo pravděpodobných situací bez vztahu k témat
 
 ### 6. Stručný závěr a další krok
 
-Shrň pouze rozhodující informaci a nabídni konkrétní další krok. Pokud je to relevantní, může závěr doporučit kontrolu celé trasy v EuroGoPass. Nepřidávej nový fakt, který nebyl vysvětlen v hlavním textu.
+Shrň pouze rozhodující informaci a dej konkrétní další krok přes EuroGoPass: ověřit trasu, zkontrolovat potřebné produkty nebo dokončit nákup. Nepřidávej nový fakt, který nebyl vysvětlen v hlavním textu.
 
 ## Formát Markdown
 

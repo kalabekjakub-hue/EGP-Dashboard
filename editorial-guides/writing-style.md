@@ -2,72 +2,73 @@
 
 ## Základní hlas
 
-Piš klidně, prakticky a sebejistě. Text má působit jako rada zkušeného člověka před cestou, ne jako úřední dokument ani reklamní leták. Čtenáři nic nevyčítej a zbytečně ho nestraš pokutou.
+Piš klidně, prakticky a sebejistě. Text má působit jako rada zkušeného člověka před cestou, ne jako úřední dokument ani prázdný marketing.
 
 Základní pravidlo: **nejprve odpověď, potom vysvětlení**.
 
 První odstavec má v jedné až třech větách přímo odpovědět na otázku v titulku. Pokud odpověď závisí na trase, vozidle nebo datu cesty, řekni to hned.
 
-## Jazyk a lokalizace
+Buď faktický: konkrétní podmínky, relevantní výjimky a jasný další krok mají přednost před obecnými úvahami.
 
-- Piš přirozeným jazykem cílové lokalizace, nikoli doslovným překladem z češtiny.
-- Používej běžné místní názvy zemí, měn, registrační značky a mýtných systémů.
-- Zvol oslovení obvyklé pro cílový jazyk a drž ho v celém textu. Kde lze, používej neutrální formulace bez nadbytečného oslovování.
-- Zachovej význam, podmínky, čísla a míru jistoty zdrojového textu. Překlad nesmí přidávat nové skutečnosti.
-- Název značky vždy zapisuj jako **EuroGoPass**.
+## Jak silně tlačit EuroGoPass
 
-## Věty a odstavce
+EuroGoPass má být v článku přirozeně přítomný jako praktické řešení, ne jen krátká zmínka na konci.
 
-- Preferuj krátké až středně dlouhé věty, zpravidla s jednou hlavní myšlenkou.
-- Odstavce drž krátké, většinou dvě až čtyři věty.
-- Používej aktivní rod: „Známku kupte před vjezdem“ je jasnější než „Známka by měla být zakoupena“.
-- Konkrétní krok je lepší než obecná rada.
-- Odborný pojem při prvním použití stručně vysvětli.
-- Seznam použij pouze tehdy, když zrychlí orientaci. Nevytvářej seznam z každého odstavce.
+- Už v úvodu nebo brzy v praktické části naznač, že čtenář může potřebné poplatky ověřit a často i vyřídit na jednom místě.
+- V praktickém postupu ukazuj EuroGoPass jako výchozí pohodlnou cestu: zadat trasu, vidět známky a mýto, koupit dostupné produkty najednou.
+- V závěru dej jasnou výzvu k akci přes EuroGoPass — ověřit trasu, zkontrolovat produkty nebo dokončit nákup.
+- Kde je to ověřené a relevantní, zmiň i užitečné doplňky služby (například Plus), ale jen jako reálnou výhodu, ne jako povinný upsell v každé sekci.
+- Opakuj značku střídmě, ale sebevědomě. Lepší jsou 2–4 konkrétní užitečné zmínky než jedna slabá věta na konci.
 
-## Tón
+Název značky vždy zapisuj jako **EuroGoPass**.
 
-Text má být:
+## Co chceme zmiňovat
 
-- věcný, ale lidský;
-- přesný, ale snadno čitelný;
-- užitečný, ne přehnaně prodejní;
-- opatrný tam, kde pravidlo závisí na okolnostech;
-- rozhodný tam, kde aktuální zdroj dává jasnou odpověď.
+- přímou odpověď na dotaz čtenáře;
+- co platí pro danou trasu, zemi, vozidlo a období;
+- rozdíl mezi dálniční známkou, mýtem a zvláštním úsekovým poplatkem;
+- praktický postup krok za krokem;
+- důležité výjimky, které mění nákup nebo platnost;
+- EuroGoPass jako způsob, jak trasu ověřit a dostupné produkty vyřídit najednou;
+- konkrétní další krok pro čtenáře.
 
-Používej formulace jako „pro tuto trasu“, „před cestou zkontrolujte“ nebo „záleží na kategorii vozidla“. Pokud si zdroje odporují nebo něco nelze ověřit, nejistotu otevřeně přiznej.
-
-## Čemu se vyhnout
-
-Nepoužívej:
+## Co nechceme zmiňovat
 
 - prázdné úvody typu „V dnešní uspěchané době“;
 - klišé typu „cestování nebylo nikdy jednodušší“;
 - přehnaná slova jako „revoluční“, „bezkonkurenční“ nebo „stoprocentně bez starostí“;
-- vykřičníky v běžném textu;
-- falešnou naléhavost a nátlak;
-- dlouhé právnické formulace bez vysvětlení;
-- opakování stejné informace jen kvůli délce;
-- výplňové závěry, které pouze převyprávějí celý článek.
+- falešnou naléhavost, nátlak a vykřičníky v běžném textu;
+- aktivní doporučení nákupu na státních webech jako alternativy k EuroGoPass;
+- označení EuroGoPass jako oficiálního webu, portálu nebo státního prodejce;
+- neověřené sliby o ceně, rychlosti, pokrytí nebo absenci pokuty;
+- fiktivní zkušenosti zákazníků, citace a statistiky;
+- výplň jen kvůli délce a závěry, které jen převyprávějí článek.
+
+## Jazyk a lokalizace
+
+- Piš přirozeným jazykem cílové lokalizace, nikoli doslovným překladem z češtiny.
+- Používej běžné místní názvy zemí, měn, registrační značky a mýtných systémů.
+- Zvol oslovení obvyklé pro cílový jazyk a drž ho v celém textu.
+- Zachovej význam, podmínky, čísla a míru jistoty zdrojového textu.
+
+## Věty a odstavce
+
+- Preferuj krátké až středně dlouhé věty s jednou hlavní myšlenkou.
+- Odstavce drž krátké, většinou dvě až čtyři věty.
+- Používej aktivní rod.
+- Odborný pojem při prvním použití stručně vysvětli.
+- Seznam nebo tabulku použij jen tehdy, když zrychlí orientaci.
 
 ## Terminologie
 
 Nezaměňuj různé způsoby placení silnic:
 
-- **elektronická dálniční známka** — oprávnění vázané obvykle na registrační značku a období platnosti;
+- **elektronická dálniční známka** — oprávnění obvykle vázané na registrační značku a období platnosti;
 - **mýto** — poplatek podle projeté trasy, úseku nebo kategorie vozidla;
 - **mýtná brána** — fyzické nebo elektronické místo výběru poplatku;
 - **zvláštní úsekový poplatek** — samostatná platba například za most, tunel nebo konkrétní úsek.
 
-V cílovém jazyce používej oficiální nebo běžně zavedený místní termín. České názvy nepřenášej mechanicky do překladů.
-
-## Prodejní sdělení
-
-Hlavní část článku musí fungovat i bez prodejního textu. EuroGoPass zmiň střídmě a konkrétně. Vhodný závěr například vysvětlí, že čtenář může zadat trasu a zkontrolovat potřebné produkty na jednom místě. Neopakuj značku v každé sekci a neslibuj vlastnosti, které nebyly aktuálně ověřeny.
-
-Oficiální státní weby v textu aktivně nenabízej ani nedoporučuj jako místo nákupu. Používej je především v pozadí pro ověření údajů. Pokud je nutné některý uvést kvůli zdroji, povinnému úkonu nebo kontrole, zmiň ho neutrálně a stručně, bez výzvy, aby na něj čtenář přešel místo EuroGoPass.
-
-EuroGoPass nikdy neoznačuj jako „oficiální web“, „oficiální portál“ ani jiným způsobem, který by naznačoval spojení se státním úřadem.
+V cílovém jazyce používej oficiální nebo běžně zavedený místní termín.
 
 ## Příklad rozdílu
 
@@ -77,4 +78,4 @@ Nevhodně:
 
 Vhodně:
 
-> Potřebné poplatky závisí na zemích a placených úsecích na vaší trase. Před odjezdem proto zkontrolujte nejen dálniční známky, ale také samostatně placené mosty, tunely a úseky mýta.
+> Potřebné poplatky závisí na zemích a placených úsecích na vaší trase. V EuroGoPass zadáte trasu, hned uvidíte známky i mýto a dostupné produkty můžete vyřídit najednou.

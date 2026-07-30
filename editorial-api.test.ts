@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, parseDelimitedRows, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
+import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, markdownLinks, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -52,9 +52,20 @@ test("loads the shared SEO/GEO contract for every AI stage", () => {
   assert.match(writingStylesContract, /factual/);
   assert.match(writingStylesContract, /roadmate/);
   assert.match(writingStylesContract, /Faktická přesnost je ve všech profilech stejná/i);
+  assert.match(writingStylesContract, /Markdown podklad/i);
+  assert.equal(primaryEditorialGuideFilename, "editor-prompt.md");
   assert.match(keywordClustersContract, /Nejdříve cluster, potom téma/i);
   assert.match(keywordClustersContract, /jeden den, deset dní, měsíc, dva měsíce nebo rok/i);
   assert.match(keywordClustersContract, /nemá pevné minimum ani maximum/i);
+});
+
+test("editorial guides put editor-prompt.md first as the main prompt", () => {
+  const ordered = orderEditorialGuides([
+    { filename: "writing-style.md" },
+    { filename: "Editor-Prompt.md" },
+    { filename: "brand-context.md" },
+  ]);
+  assert.deepEqual(ordered.map(row => row.filename), ["Editor-Prompt.md", "brand-context.md", "writing-style.md"]);
 });
 
 test("keyword opportunity score is stable and does not use random ordering", () => {

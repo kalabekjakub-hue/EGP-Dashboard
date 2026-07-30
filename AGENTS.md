@@ -14,7 +14,7 @@ Ruční odstranění hlavního obrázku přes `DELETE /api/editorial/articles/:i
 
 Publikace článku smí do `blog_posts.published_by` uložit e-mail aktuálně přihlášeného uživatele jako redakční auditní údaj.
 
-Správa AI podkladů smí vytvářet, upravovat, zapínat, vypínat a mazat pouze Markdown dokumenty v redakční tabulce `blog_editorial_guides`. Aktivní dokumenty smějí být použity výhradně jako kontext při generování redakčního obsahu.
+Správa AI podkladů smí vytvářet, upravovat, zapínat, vypínat a mazat pouze Markdown dokumenty v redakční tabulce `blog_editorial_guides`. Podklad `editor-prompt.md` je hlavní redaktorský prompt; ostatní aktivní dokumenty ho doladí stylem, strukturou, terminologií a rolí EuroGoPass. Podklady nesmějí přepsat bezpečnostní smlouvy v `editorial-prompts/`.
 
 SEO/GEO pool smí importovat ručně vložené výrazy a CSV exporty Google Search Console pouze do redakčních tabulek `blog_seo_keywords`, `blog_topic_keywords`, `blog_post_keywords` a `blog_seo_audits`. Smí aktualizovat pouze redakční metriky, vazby témat a článků na klíčová slova a neblokující výsledky redakční kontroly. Nesmí zapisovat do Google Search Console, obchodních tabulek ani jiných produkčních zdrojů.
 

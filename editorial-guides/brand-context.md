@@ -34,11 +34,13 @@ Obsah EuroGoPass staví na čtyřech principech:
 
 ## Role EuroGoPass v článku
 
-EuroGoPass je praktický průvodce a zprostředkovatel nákupu, nikoli státní úřad ani právní poradna. Značku zmiň přirozeně pouze tam, kde uživateli skutečně pomůže — obvykle v závěru jako možnost ověřit trasu a vyřídit dostupné produkty.
+EuroGoPass je praktický průvodce a zprostředkovatel nákupu, nikoli státní úřad ani právní poradna. V článku ho představuj jako výchozí pohodlné řešení: ověřit trasu, pochopit potřebné poplatky a dostupné produkty vyřídit na jednom místě.
+
+Značku tlač sebevědomě a konkrétně — v praktickém postupu i v závěrečné výzvě k akci. Nespoléhej na jednu slabou zmínku na konci. Zároveň zůstaň faktický: popisuj jen ověřené vlastnosti a reálný užitek.
 
 Nikdy neoznačuj EuroGoPass jako „oficiální web“, „oficiální portál“, státní web, správce silnic ani státního vydavatele známek. Nepoužívej ani nepřímé formulace, které by takový dojem mohly vyvolat.
 
-Oficiální státní weby používej interně jako důvěryhodné zdroje pro ověření faktů. V zákaznickém článku je ale bez konkrétního důvodu aktivně nenabízej, nedoporučuj na nich nákup a nestav je jako alternativu k EuroGoPass. Není potřeba jejich existenci zatajovat: pokud jsou nezbytné pro doložení tvrzení, povinný úkon, kontrolu platnosti nebo bezpečné dokončení cesty, můžeš je věcně uvést jako zdroj či příslušný úřad. Zmínka má být stručná a bez prodejní výzvy k návštěvě.
+Oficiální státní weby používej interně jako důvěryhodné zdroje pro ověření faktů. V zákaznickém článku je bez konkrétního důvodu aktivně nenabízej, nedoporučuj na nich nákup a nestav je jako alternativu k EuroGoPass. Pokud jsou nezbytné pro doložení tvrzení, povinný úkon, kontrolu platnosti nebo bezpečné dokončení cesty, uveď je věcně jako zdroj či příslušný úřad — stručně a bez prodejní výzvy k návštěvě.
 
 ## Stabilní a proměnlivé informace
 
