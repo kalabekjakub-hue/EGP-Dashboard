@@ -2,11 +2,12 @@
 
 Veškerý přístup tohoto dashboardu a práce agentů k produkčním datům je **READ-ONLY**.
 
-Povolené jsou pouze tři výjimky:
+Povolené jsou pouze tyto výjimky:
 
-1. Ruční označení existující položky objednávky jako `FULFILLED` včetně souvisejícího auditního záznamu.
-2. Zápisy nutné pro funkce Redakce/blogu do výhradně redakčních tabulek a úložišť.
-3. Vytvoření lokálního dashboard přihlašovacího záznamu při prvním přihlášení výhradně pro e-maily na explicitním allowlistu. Záznam smí obsahovat pouze e-mail, kryptografickou sůl, `scrypt` hash hesla a čas vytvoření v odděleném lokálním auth úložišti; nesmí vzniknout Supabase Auth účet ani zápis do obchodních nebo redakčních dat.
+1. Ruční označení existující položky objednávky jako `FULFILLED` včetně souvisejícího auditního záznamu a volitelné operátorské poznámky k důvodu.
+2. Operátorské poznámky k existující položce objednávky ve výhradně dashboard tabulce `dashboard_order_item_notes` (vytvoření/nahrazení a úplné smazání poznámek položky, bez změny obchodních polí položky).
+3. Zápisy nutné pro funkce Redakce/blogu do výhradně redakčních tabulek a úložišť.
+4. Vytvoření lokálního dashboard přihlašovacího záznamu při prvním přihlášení výhradně pro e-maily na explicitním allowlistu. Záznam smí obsahovat pouze e-mail, kryptografickou sůl, `scrypt` hash hesla a čas vytvoření v odděleném lokálním auth úložišti; nesmí vzniknout Supabase Auth účet ani zápis do obchodních nebo redakčních dat.
 
 Schválené redakční operace zahrnují také ruční smazání tématu přes `DELETE /api/editorial/topics/:id`; endpoint smí mazat pouze odpovídající řádek v `blog_topic_queue` a nesmí kaskádově měnit ani mazat obchodní data.
 
@@ -24,6 +25,6 @@ Volba stylu článku smí před generováním uložit pouze jednu z povolených 
 
 Ruční SEO/GEO aktualizace přes `POST /api/editorial/articles/:id/locales/:locale/seo-refresh` smí pro zadaný článek znovu vybrat výrazy z redakčního poolu, nahradit pouze jeho vazby v `blog_post_keywords`, vytvořit novou konceptovou revizi dané jazykové verze v `blog_translation_drafts`, uložit generační audit do `blog_generation_runs` a obnovit kontrolu v `blog_seo_audits`. Musí zachovat fakta a podstatnou část původního textu, nesmí sama publikovat ani měnit obchodní data. Překlady se po této změně smějí aktualizovat pouze stávajícím redakčním překladovým tokem.
 
-Mimo tyto tři výjimky se nesmí v Supabase ani jiném produkčním zdroji nic vytvářet, měnit ani mazat. To zahrnuje zejména objednávky, jejich položky, platby, zákaznická data, dokumenty a fulfillment data. Filtrování, párování, deduplikace a skrývání objednávek musí probíhat pouze při čtení nebo v UI, nikdy zápisem do produkční databáze.
+Mimo tyto výjimky se nesmí v Supabase ani jiném produkčním zdroji nic vytvářet, měnit ani mazat. To zahrnuje zejména objednávky, jejich položky, platby, zákaznická data, dokumenty a fulfillment data. Filtrování, párování, deduplikace a skrývání objednávek musí probíhat pouze při čtení nebo v UI, nikdy zápisem do produkční databáze.
 
 Jakákoli nová zapisovací operace vyžaduje předem výslovné potvrzení uživatele a aktualizaci tohoto souboru i `INTEGRATION-CONTRACT.md`.

@@ -138,6 +138,15 @@ type ManualFulfillmentAudit = {
   previous_status: string | null;
   fulfilled_at: string;
   created_at: string;
+  note?: string | null;
+};
+
+type OrderItemNote = {
+  id: string;
+  order_id: string;
+  item_id: string;
+  body: string;
+  created_at: string;
 };
 
 function usePostHogAnalytics() {
@@ -864,8 +873,127 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
   };
 }
 
-function DailySummaryCard({ overview, onOpenAttention }: { overview: ReturnType<typeof buildDashboardOverview>; onOpenAttention: () => void }) {
-  return <section className="daily-summary surface"><div className="daily-information"><div className="compact-card-head"><div><strong>Denní přehled</strong><span>Dnes, {new Date().toLocaleDateString("cs-CZ", { day: "numeric", month: "long" })}</span></div></div><div className="daily-primary"><div><small>Objednávky</small><strong>{overview.orders}</strong></div><div><small>Tržby</small><strong>{overview.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong></div></div><div className="daily-statuses"><span className="done"><b>{overview.completed}</b> koupeno</span><span className="waiting"><b>{overview.waiting}</b> čeká</span><span className="failed"><b>{overview.failed}</b> selhalo</span></div></div><button className={`attention-trigger ${overview.incidents.length ? "has-issues" : "clear"}`} onClick={onOpenAttention}><span className="attention-trigger-icon"><Activity size={20} /><b>{overview.incidents.length}</b></span><span><strong>Centrum pozornosti</strong><small>{overview.incidents.length ? `${overview.incidents.length} položek ke kontrole` : "Všechno je v pořádku"}</small></span><ChevronRight size={18} /></button></section>;
+function buildDailyHistory(orderData: Order[]) {
+  const today = pragueDay(new Date().toISOString());
+  const byDay = new Map<string, { orders: number; revenue: number; completed: number; failed: number }>();
+  const ensure = (day: string) => {
+    const current = byDay.get(day);
+    if (current) return current;
+    const next = { orders: 0, revenue: 0, completed: 0, failed: 0 };
+    byDay.set(day, next);
+    return next;
+  };
+
+  for (const order of orderData) {
+    const createdDay = pragueDay(order.createdAtIso);
+    if (createdDay) {
+      const day = ensure(createdDay);
+      day.orders += 1;
+      if (order.status === "fulfilled") day.completed += 1;
+      else if (order.status === "failed") day.failed += 1;
+    }
+    if (order.status === "awaiting_payment" || !order.paidAtIso) continue;
+    const paidDay = pragueDay(order.paidAtIso);
+    if (paidDay) ensure(paidDay).revenue += order.totalEur ?? order.total;
+  }
+
+  const yesterday = pragueDay(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  return [...byDay.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([dayKey, stats]) => {
+      const date = new Date(`${dayKey}T12:00:00`);
+      const label = dayKey === today
+        ? "Dnes"
+        : dayKey === yesterday
+          ? "Včera"
+          : date.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" });
+      return {
+        dayKey,
+        label,
+        orders: stats.orders,
+        revenue: stats.revenue,
+        completed: stats.completed,
+        failed: stats.failed,
+        waiting: Math.max(0, stats.orders - stats.completed - stats.failed),
+      };
+    });
+}
+
+function DailySummaryCard({ overview, orderData, onOpenAttention }: { overview: ReturnType<typeof buildDashboardOverview>; orderData: Order[]; onOpenAttention: () => void }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const history = useMemo(() => buildDailyHistory(orderData), [orderData]);
+  return (
+    <>
+      <section className="daily-summary surface">
+        <button type="button" className="daily-information" onClick={() => setHistoryOpen(true)} aria-label="Zobrazit statistiky minulých dní">
+          <div className="compact-card-head">
+            <div>
+              <strong>Denní přehled</strong>
+              <span>Dnes, {new Date().toLocaleDateString("cs-CZ", { day: "numeric", month: "long" })}</span>
+            </div>
+          </div>
+          <div className="daily-primary">
+            <div><small>Objednávky</small><strong>{overview.orders}</strong></div>
+            <div><small>Tržby</small><strong>{overview.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</strong></div>
+          </div>
+          <div className="daily-statuses">
+            <span className="done"><b>{overview.completed}</b> koupeno</span>
+            <span className="waiting"><b>{overview.waiting}</b> čeká</span>
+            <span className="failed"><b>{overview.failed}</b> selhalo</span>
+          </div>
+        </button>
+        <button className={`attention-trigger ${overview.incidents.length ? "has-issues" : "clear"}`} onClick={onOpenAttention}>
+          <span className="attention-trigger-icon"><Activity size={20} /><b>{overview.incidents.length}</b></span>
+          <span><strong>Centrum pozornosti</strong><small>{overview.incidents.length ? `${overview.incidents.length} položek ke kontrole` : "Všechno je v pořádku"}</small></span>
+          <ChevronRight size={18} />
+        </button>
+      </section>
+      {historyOpen && <DailyHistoryModal rows={history} onClose={() => setHistoryOpen(false)} />}
+    </>
+  );
+}
+
+function DailyHistoryModal({ rows, onClose }: { rows: ReturnType<typeof buildDailyHistory>; onClose: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+  return (
+    <div className="attention-modal" role="presentation" onMouseDown={onClose}>
+      <section className="attention-dialog surface daily-history-dialog" role="dialog" aria-modal="true" aria-labelledby="daily-history-title" onMouseDown={event => event.stopPropagation()}>
+        <button className="attention-close" onClick={onClose} aria-label="Zavřít"><X size={18} /></button>
+        <div className="attention-dialog-head">
+          <span className="attention-dialog-icon daily-history-icon"><BarChart3 size={21} /></span>
+          <div>
+            <h2 id="daily-history-title">Denní statistiky</h2>
+            <p>Objednávky a tržby podle dní</p>
+          </div>
+        </div>
+        {rows.length ? (
+          <div className="daily-history-list">
+            <div className="daily-history-head"><span>Den</span><span>Obj.</span><span>Tržby</span></div>
+            {rows.map(row => (
+              <article key={row.dayKey}>
+                <time>{row.label}</time>
+                <span className="daily-history-count" tabIndex={0} aria-label={`${row.orders} objednávek: ${row.completed} koupeno, ${row.waiting} čeká, ${row.failed} selhalo`}>
+                  <strong>{row.orders}</strong>
+                  <span className="daily-history-tip" role="tooltip">
+                    <span className="done"><b>{row.completed}</b> koupeno</span>
+                    <span className="waiting"><b>{row.waiting}</b> čeká</span>
+                    <span className="failed"><b>{row.failed}</b> selhalo</span>
+                  </span>
+                </span>
+                <span>{row.revenue.toLocaleString("cs-CZ", { style: "currency", currency: "EUR" })}</span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="attention-clear"><span className="live-dot" />Zatím žádná denní data</div>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function AttentionCenter({ incidents, onOpen, onClose }: { incidents: DashboardIncident[]; onOpen: (incident: DashboardIncident) => void; onClose: () => void }) {
@@ -1252,7 +1380,7 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
       <OrderColumn orderData={orderData} openOrder={openOrder} showAll={() => navigate("orders")} />
       <div className="workspace">
         <div className="dashboard-overview">
-          <DailySummaryCard overview={overview} onOpenAttention={() => setAttentionOpen(true)} />
+          <DailySummaryCard overview={overview} orderData={orderData} onOpenAttention={() => setAttentionOpen(true)} />
           <EditorialPreview onOpen={() => navigate("editorial")} />
           <PostHogPreview onOpen={() => navigate("posthog")} />
         </div>
@@ -1270,26 +1398,103 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
   const [orderLogs, setOrderLogs] = useState<WorkerLogEntry[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [fulfillOpen, setFulfillOpen] = useState(false);
-  const [fulfillItemId, setFulfillItemId] = useState("");
+  const [fulfillItemIds, setFulfillItemIds] = useState<string[]>([]);
   const [fulfillState, setFulfillState] = useState<"idle" | "saving" | "error">("idle");
   const [manualAudit, setManualAudit] = useState<ManualFulfillmentAudit[]>([]);
-  const [auditVersion, setAuditVersion] = useState(0);
+  const [itemNotes, setItemNotes] = useState<OrderItemNote[]>([]);
+  const [notesVersion, setNotesVersion] = useState(0);
+  const [noteItemId, setNoteItemId] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [noteState, setNoteState] = useState<"idle" | "saving" | "error">("idle");
+
+  const toggleFulfillItem = (itemId: string) => {
+    setFulfillState("idle");
+    setFulfillItemIds(current => current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId]);
+  };
 
   const confirmFulfilled = async () => {
-    const item = order.items.find(candidate => candidate.id === fulfillItemId);
-    if (!item?.id || !item.source) return;
+    const selected = order.items.filter(item => item.id && item.source && fulfillItemIds.includes(item.id));
+    if (!selected.length) return;
     setFulfillState("saving");
     try {
-      const response = await fetch("/api/orders/fulfill-item", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ orderId: order.id, itemId: item.id, source: item.source }) });
-      const payload = await response.json() as { ok?: boolean; fulfilledAt?: string };
-      if (!response.ok || !payload.ok || !payload.fulfilledAt) throw new Error();
-      onItemFulfilled(item.id, payload.fulfilledAt);
+      for (const item of selected) {
+        const pendingNote = noteDrafts[item.id!] ?? "";
+        const response = await fetch("/api/orders/fulfill-item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            orderId: order.id,
+            itemId: item.id,
+            source: item.source,
+            note: pendingNote || undefined,
+          }),
+        });
+        const payload = await response.json() as { ok?: boolean; fulfilledAt?: string };
+        if (!response.ok || !payload.ok || !payload.fulfilledAt) throw new Error();
+        onItemFulfilled(item.id!, payload.fulfilledAt);
+      }
       setFulfillOpen(false);
-      setFulfillItemId("");
+      setFulfillItemIds([]);
+      setNoteDrafts({});
       setFulfillState("idle");
-      setAuditVersion(version => version + 1);
+      setNotesVersion(version => version + 1);
     } catch {
       setFulfillState("error");
+    }
+  };
+
+  const saveItemNote = async () => {
+    const item = order.items.find(candidate => candidate.id === noteItemId);
+    if (!item?.id || !item.source || !noteDraft.trim()) return;
+    setNoteState("saving");
+    try {
+      setNoteDrafts(current => ({ ...current, [item.id!]: noteDraft.trim() }));
+      const response = await fetch("/api/orders/item-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          orderId: order.id,
+          itemId: item.id,
+          source: item.source,
+          countryCode: item.country,
+          body: noteDraft.trim(),
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean };
+      if (!response.ok || !payload.ok) throw new Error();
+      setNoteItemId("");
+      setNoteDraft("");
+      setNoteState("idle");
+      setNotesVersion(version => version + 1);
+    } catch {
+      setNoteState("error");
+    }
+  };
+
+  const deleteItemNote = async () => {
+    const item = order.items.find(candidate => candidate.id === noteItemId);
+    if (!item?.id) return;
+    setNoteState("saving");
+    try {
+      const response = await fetch("/api/orders/item-notes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ orderId: order.id, itemId: item.id }),
+      });
+      const payload = await response.json() as { ok?: boolean };
+      if (!response.ok || !payload.ok) throw new Error();
+      setNoteDrafts(current => {
+        const next = { ...current };
+        delete next[item.id!];
+        return next;
+      });
+      setNoteItemId("");
+      setNoteDraft("");
+      setNoteState("idle");
+      setNotesVersion(version => version + 1);
+    } catch {
+      setNoteState("error");
     }
   };
 
@@ -1317,12 +1522,31 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
 
   useEffect(() => {
     let active = true;
-    void fetch(`/api/manual-fulfillment-audit?orderId=${encodeURIComponent(order.id)}`, { headers: { Accept: "application/json" } })
-      .then(response => response.ok ? response.json() as Promise<{ entries?: ManualFulfillmentAudit[] }> : Promise.reject())
-      .then(payload => { if (active) setManualAudit(Array.isArray(payload.entries) ? payload.entries : []); })
-      .catch(() => { if (active) setManualAudit([]); });
+    void Promise.all([
+      fetch(`/api/manual-fulfillment-audit?orderId=${encodeURIComponent(order.id)}`, { headers: { Accept: "application/json" } })
+        .then(response => response.ok ? response.json() as Promise<{ entries?: ManualFulfillmentAudit[] }> : Promise.reject())
+        .then(payload => Array.isArray(payload.entries) ? payload.entries : [])
+        .catch(() => [] as ManualFulfillmentAudit[]),
+      fetch(`/api/orders/item-notes?orderId=${encodeURIComponent(order.id)}`, { headers: { Accept: "application/json" } })
+        .then(response => response.ok ? response.json() as Promise<{ notes?: OrderItemNote[] }> : Promise.reject())
+        .then(payload => Array.isArray(payload.notes) ? payload.notes : [])
+        .catch(() => [] as OrderItemNote[]),
+    ]).then(([audit, notes]) => {
+      if (!active) return;
+      setManualAudit(audit);
+      setItemNotes(notes);
+    });
     return () => { active = false; };
-  }, [order.id, auditVersion]);
+  }, [order.id, notesVersion]);
+
+  const noteTarget = order.items.find(item => item.id === noteItemId);
+  const noteTextForItem = (itemId?: string) => {
+    if (!itemId) return "";
+    if (noteDrafts[itemId]?.trim()) return noteDrafts[itemId].trim();
+    return itemNotes.find(note => note.item_id === itemId)?.body?.trim() ?? "";
+  };
+  const hasNote = (itemId?: string) => Boolean(itemId && (noteTextForItem(itemId) || manualAudit.some(entry => entry.item_id === itemId && entry.note?.trim())));
+  const noteTargetHasStored = Boolean(noteItemId && (itemNotes.some(note => note.item_id === noteItemId) || noteDrafts[noteItemId]));
 
   return (
     <main className="page-shell">
@@ -1331,7 +1555,7 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
         <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p>{order.plus && <span className="plus-badge"><Plus size={13} strokeWidth={3} /> Plus</span>}</div></div>
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
-        <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemId(""); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
+        <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
       </section>
       <section className="items-section">
         <div className="section-heading"><div><span className="eyebrow">Obsah objednávky</span><h2>Známky, mosty a placené úseky</h2></div><span className="count">{order.items.length}</span></div>
@@ -1339,10 +1563,15 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
           const timeline = buildItemTimeline(order.id, item, orderLogs);
           const itemKey = item.id ?? `${item.source}-${item.country}-${item.product}`;
           const dateLabel = item.itemKind && item.itemKind !== "vignette" ? `Průjezd ${item.validFrom}` : `${item.validFrom} – ${item.validTo}`;
+          const itemNote = noteTextForItem(item.id);
           return <article className={`item-card ${item.status}`} key={itemKey}>
             <button className="item-summary" onClick={() => setExpanded(expanded === itemKey ? "" : itemKey)}>
-              <span className="country-flag"><Flag code={item.country} /></span><div><strong>{item.product} · {item.displayCode ?? item.country}</strong><span>{dateLabel}</span></div>
-              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.duration ?? "Čeká"}</span></div><span className={`status-tag ${item.status}`}>{statusLabels[item.status]}</span>{expanded === itemKey ? <ChevronDown /> : <ChevronRight />}
+              <span className="country-flag"><Flag code={item.country} /></span>
+              <div><strong>{item.product} · {item.displayCode ?? item.country}</strong><span>{dateLabel}</span></div>
+              <div className={`item-note-slot${itemNote ? " has-note" : ""}`}>{itemNote || ""}</div>
+              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.duration ?? "Čeká"}</span></div>
+              <span className={`status-tag ${item.status}`}>{statusLabels[item.status]}</span>
+              {expanded === itemKey ? <ChevronDown /> : <ChevronRight />}
             </button>
             {expanded === itemKey && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{item.status === "failed" && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený.</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
           </article>;
@@ -1353,12 +1582,91 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
         <div className="manual-audit-list surface">
           {manualAudit.length ? manualAudit.map(entry => <article key={entry.id}>
             <span className="manual-audit-icon"><CheckCircle2 size={17} /></span>
-            <div><strong>{entry.country_code ? `${entry.country_code} · ` : ""}Označeno ručně jako FULFILLED</strong><small>Předchozí stav: {entry.previous_status || "neuveden"}</small></div>
+            <div>
+              <strong>{entry.country_code ? `${entry.country_code} · ` : ""}Označeno ručně jako FULFILLED</strong>
+              <small>Předchozí stav: {entry.previous_status || "neuveden"}</small>
+              {entry.note?.trim() && <p className="manual-audit-note">{entry.note.trim()}</p>}
+            </div>
             <div className="manual-audit-who"><strong>{entry.actor_email}</strong><time>{statusDate(entry.fulfilled_at)}</time></div>
           </article>) : <div className="manual-audit-empty">U této objednávky zatím nebyl proveden žádný ruční FULFILLED.</div>}
         </div>
       </section>
-      {fulfillOpen && <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => fulfillState !== "saving" && setFulfillOpen(false)}><section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="manual-fulfill-title" onMouseDown={event => event.stopPropagation()}><button className="manual-fulfill-close" onClick={() => setFulfillOpen(false)} aria-label="Zavřít"><X size={18} /></button><span className="manual-fulfill-icon"><CheckCircle2 size={22} /></span><h2 id="manual-fulfill-title">Označit jako FULFILLED</h2><p>Vyber konkrétní položku, kterou jsi ručně dokončil. Změna se zapíše přímo do Supabase.</p><div className="manual-country-list">{order.items.map(item => <button key={item.id ?? `${item.source}-${item.country}-${item.product}`} className={fulfillItemId === item.id ? "selected" : ""} disabled={!item.id || !item.source || fulfillState === "saving"} onClick={() => { setFulfillItemId(item.id ?? ""); setFulfillState("idle"); }}><Flag code={item.country} /><span><strong>{item.product}</strong><small>{item.displayCode ?? item.country}</small></span><i /></button>)}</div>{fulfillState === "error" && <div className="manual-fulfill-error">Zápis se nepodařil. Zkus to prosím znovu.</div>}<div className="manual-fulfill-actions"><button onClick={() => setFulfillOpen(false)} disabled={fulfillState === "saving"}>Zrušit</button><button className="confirm" onClick={() => void confirmFulfilled()} disabled={!fulfillItemId || fulfillState === "saving"}>{fulfillState === "saving" ? "Ukládám…" : "Potvrdit FULFILLED"}</button></div></section></div>}
+      {fulfillOpen && (
+        <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => fulfillState !== "saving" && setFulfillOpen(false)}>
+          <section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="manual-fulfill-title" onMouseDown={event => event.stopPropagation()}>
+            <button className="manual-fulfill-close" onClick={() => setFulfillOpen(false)} aria-label="Zavřít"><X size={18} /></button>
+            <span className="manual-fulfill-icon"><CheckCircle2 size={22} /></span>
+            <h2 id="manual-fulfill-title">Označit jako FULFILLED</h2>
+            <p>Vyber jednu nebo více položek. Plus vpravo přidá poznámku k položce.</p>
+            <div className="manual-country-list">
+              {order.items.map(item => {
+                const selected = Boolean(item.id && fulfillItemIds.includes(item.id));
+                return (
+                  <div className="manual-country-row" key={item.id ?? `${item.source}-${item.country}-${item.product}`}>
+                    <button
+                      type="button"
+                      className={`manual-country-pick${selected ? " selected" : ""}`}
+                      disabled={!item.id || !item.source || fulfillState === "saving"}
+                      onClick={() => item.id && toggleFulfillItem(item.id)}
+                    >
+                      <Flag code={item.country} />
+                      <span><strong>{item.product}</strong><small>{item.displayCode ?? item.country}</small></span>
+                      <i />
+                    </button>
+                    <button
+                      type="button"
+                      className={`manual-note-plus${hasNote(item.id) ? " has-note" : ""}`}
+                      disabled={!item.id || !item.source || fulfillState === "saving"}
+                      title="Přidat poznámku"
+                      aria-label="Přidat poznámku"
+                      onClick={() => {
+                        if (!item.id) return;
+                        const existing = itemNotes.find(note => note.item_id === item.id)?.body?.trim() || "";
+                        setNoteItemId(item.id);
+                        setNoteDraft(noteDrafts[item.id] ?? existing);
+                        setNoteState("idle");
+                      }}
+                    >
+                      <Plus size={16} strokeWidth={2.25} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {fulfillState === "error" && <div className="manual-fulfill-error">Zápis se nepodařil. Zkus to prosím znovu.</div>}
+            <div className="manual-fulfill-actions">
+              <button onClick={() => setFulfillOpen(false)} disabled={fulfillState === "saving"}>Zrušit</button>
+              <button className="confirm" onClick={() => void confirmFulfilled()} disabled={!fulfillItemIds.length || fulfillState === "saving"}>
+                {fulfillState === "saving" ? "Ukládám…" : fulfillItemIds.length > 1 ? `Potvrdit FULFILLED (${fulfillItemIds.length})` : "Potvrdit FULFILLED"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {noteTarget && (
+        <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => noteState !== "saving" && setNoteItemId("")}>
+          <section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="item-note-title" onMouseDown={event => event.stopPropagation()}>
+            <button className="manual-fulfill-close" onClick={() => setNoteItemId("")} aria-label="Zavřít"><X size={18} /></button>
+            <span className="manual-fulfill-icon note"><Plus size={22} /></span>
+            <h2 id="item-note-title">Poznámka k položce</h2>
+            <p>{noteTarget.product} · {noteTarget.displayCode ?? noteTarget.country}</p>
+            <label className="manual-note-field">
+              <span>Text poznámky</span>
+              <textarea value={noteDraft} onChange={event => setNoteDraft(event.target.value)} maxLength={2000} rows={4} placeholder="Proč je to označené / co je potřeba vědět…" autoFocus disabled={noteState === "saving"} />
+            </label>
+            {noteState === "error" && <div className="manual-fulfill-error">Poznámku se nepodařilo uložit nebo smazat.</div>}
+            <div className="manual-fulfill-actions">
+              {noteTargetHasStored && (
+                <button className="danger" onClick={() => void deleteItemNote()} disabled={noteState === "saving"}>
+                  <Trash2 size={14} /> Smazat
+                </button>
+              )}
+              <button onClick={() => setNoteItemId("")} disabled={noteState === "saving"}>Zrušit</button>
+              <button className="confirm" onClick={() => void saveItemNote()} disabled={!noteDraft.trim() || noteState === "saving"}>{noteState === "saving" ? "Ukládám…" : "Uložit poznámku"}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

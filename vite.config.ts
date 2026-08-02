@@ -108,14 +108,18 @@ function dashboardWritePolicy() {
           res.end(JSON.stringify({ error: "Požadavek z cizího originu byl odmítnut" }));
           return;
         }
-        if ((method === "POST" && route === "/orders/fulfill-item") || route.startsWith("/editorial/")) {
+        if (
+          (method === "POST" && (route === "/orders/fulfill-item" || route === "/orders/item-notes"))
+          || (method === "DELETE" && route === "/orders/item-notes")
+          || route.startsWith("/editorial/")
+        ) {
           next();
           return;
         }
         res.statusCode = 405;
         res.setHeader("Allow", "GET, HEAD, OPTIONS");
         res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(JSON.stringify({ error: "Dashboard je read-only; povoleno je pouze ruční označení itemu jako fulfilled." }));
+        res.end(JSON.stringify({ error: "Dashboard je read-only; povoleno je pouze ruční označení itemu jako fulfilled a poznámky k položkám." }));
       });
     },
   };
@@ -485,9 +489,11 @@ function manualFulfillmentApi() {
           const sid = cookieValue(req.headers.cookie, "egp_admin_session");
           const session = sid ? authSessions.get(sid) : undefined;
           if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) throw new Error("Přihlášení vypršelo");
-          const body = await readJsonBody<{ orderId?: string; itemId?: string; source?: string }>(req, 16 * 1024);
+          const body = await readJsonBody<{ orderId?: string; itemId?: string; source?: string; note?: string }>(req, 16 * 1024);
           const allowedSources = new Set(["order_items", "order_bridge_toll_items"]);
           if (!body.orderId || !body.itemId || !body.source || !allowedSources.has(body.source)) throw new Error("Neplatná položka objednávky");
+          const note = typeof body.note === "string" ? body.note.trim() : "";
+          if (note.length > 2000) throw new Error("Poznámka je příliš dlouhá");
           const { url, key } = loadWorkerEnv();
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
           const upstream = await fetch(`${url}/rest/v1/rpc/manual_fulfill_order_item`, {
@@ -498,6 +504,7 @@ function manualFulfillmentApi() {
               p_item_id: body.itemId,
               p_item_source: body.source,
               p_actor_email: session.email,
+              p_note: note || null,
             }),
           });
           if (!upstream.ok) throw new Error(`Supabase fulfillment ${upstream.status}`);
@@ -507,6 +514,77 @@ function manualFulfillmentApi() {
         } catch (error) {
           res.statusCode = 400;
           res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Ruční dokončení selhalo" }));
+        }
+      });
+      server.middlewares.use("/api/orders/item-notes", async (req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        const method = req.method ?? "GET";
+        if (method !== "GET" && method !== "POST" && method !== "DELETE") {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: "Method not allowed" }));
+          return;
+        }
+        try {
+          const { url, key } = loadWorkerEnv();
+          if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
+          if (method === "GET") {
+            const orderId = new URL(req.url ?? "/", "http://localhost").searchParams.get("orderId");
+            if (!orderId) throw new Error("Chybí orderId");
+            const response = await fetch(`${url}/rest/v1/dashboard_order_item_notes?select=id,order_id,item_id,item_source,country_code,actor_email,body,created_at&order_id=eq.${encodeURIComponent(orderId)}&order=created_at.desc`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+            if (!response.ok) throw new Error(`Notes API ${response.status}`);
+            res.statusCode = 200;
+            res.end(JSON.stringify({ notes: await response.json() }));
+            return;
+          }
+          const sid = cookieValue(req.headers.cookie, "egp_admin_session");
+          const session = sid ? authSessions.get(sid) : undefined;
+          if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) throw new Error("Přihlášení vypršelo");
+          if (method === "DELETE") {
+            const body = await readJsonBody<{ orderId?: string; itemId?: string }>(req, 4 * 1024);
+            if (!body.orderId || !body.itemId) throw new Error("Neplatný požadavek na smazání poznámky");
+            const del = await fetch(`${url}/rest/v1/dashboard_order_item_notes?order_id=eq.${encodeURIComponent(body.orderId)}&item_id=eq.${encodeURIComponent(body.itemId)}`, {
+              method: "DELETE",
+              headers: { apikey: key, Authorization: `Bearer ${key}`, Prefer: "return=minimal" },
+            });
+            if (!del.ok) throw new Error(`Smazání poznámky ${del.status}`);
+            res.statusCode = 200;
+            res.end(JSON.stringify({ ok: true }));
+            return;
+          }
+          const body = await readJsonBody<{ orderId?: string; itemId?: string; source?: string; countryCode?: string; body?: string }>(req, 16 * 1024);
+          const allowedSources = new Set(["order_items", "order_bridge_toll_items"]);
+          const noteBody = typeof body.body === "string" ? body.body.trim() : "";
+          if (!body.orderId || !body.itemId || !body.source || !allowedSources.has(body.source) || !noteBody) throw new Error("Neplatná poznámka");
+          if (noteBody.length > 2000) throw new Error("Poznámka je příliš dlouhá");
+          const verify = await fetch(`${url}/rest/v1/${body.source}?select=id,country_code&id=eq.${encodeURIComponent(body.itemId)}&order_id=eq.${encodeURIComponent(body.orderId)}&limit=1`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+          if (!verify.ok) throw new Error(`Ověření položky ${verify.status}`);
+          const rows = await verify.json() as Array<{ id: string; country_code?: string }>;
+          if (!rows[0]) throw new Error("Položka objednávky neexistuje");
+          // Keep one active note per item: replace previous dashboard notes for this item.
+          await fetch(`${url}/rest/v1/dashboard_order_item_notes?order_id=eq.${encodeURIComponent(body.orderId)}&item_id=eq.${encodeURIComponent(body.itemId)}`, {
+            method: "DELETE",
+            headers: { apikey: key, Authorization: `Bearer ${key}`, Prefer: "return=minimal" },
+          });
+          const insert = await fetch(`${url}/rest/v1/dashboard_order_item_notes`, {
+            method: "POST",
+            headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json", Prefer: "return=representation" },
+            body: JSON.stringify({
+              order_id: body.orderId,
+              item_id: body.itemId,
+              item_source: body.source,
+              country_code: rows[0].country_code ?? body.countryCode ?? null,
+              actor_email: session.email.toLowerCase(),
+              body: noteBody,
+            }),
+          });
+          if (!insert.ok) throw new Error(`Uložení poznámky ${insert.status}`);
+          const created = await insert.json() as Array<Record<string, unknown>>;
+          res.statusCode = 200;
+          res.end(JSON.stringify({ ok: true, note: created[0] ?? null }));
+        } catch (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, notes: [], error: error instanceof Error ? error.message : "Poznámka selhala" }));
         }
       });
       server.middlewares.use("/api/manual-fulfillment-audit", async (req, res) => {
@@ -523,7 +601,7 @@ function manualFulfillmentApi() {
           const { url, key } = loadWorkerEnv();
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
           const headers = { apikey: key, Authorization: `Bearer ${key}` };
-          const response = await fetch(`${url}/rest/v1/manual_fulfillment_audit?select=id,order_id,item_id,item_source,country_code,actor_email,previous_status,fulfilled_at,created_at&order_id=eq.${encodeURIComponent(orderId)}&order=created_at.desc`, { headers });
+          const response = await fetch(`${url}/rest/v1/manual_fulfillment_audit?select=id,order_id,item_id,item_source,country_code,actor_email,previous_status,fulfilled_at,created_at,note&order_id=eq.${encodeURIComponent(orderId)}&order=created_at.desc`, { headers });
           if (!response.ok) throw new Error(`Audit API ${response.status}`);
           res.statusCode = 200;
           res.end(JSON.stringify({ entries: await response.json() }));
