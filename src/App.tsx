@@ -193,16 +193,20 @@ type TechnicalLog = {
 };
 
 const workerEventsUrl = import.meta.env.VITE_WORKER_EVENTS_URL || "/api/worker/events";
+const BATCH_START_MESSAGES = new Set(["Running vignette batch", "Running passage batch"]);
 const stepLabels: Record<string, string> = {
   home: "Otevřena úvodní stránka",
   landing: "Otevřena úvodní stránka",
   mode: "Vybrán způsob nákupu",
-  product: "Vybrána dálniční známka",
+  product: "Vybrán produkt",
   vignette: "Vybrána dálniční známka",
+  configuration: "Nastavení produktu",
   form: "Vyplňuje se formulář",
   vehicle: "Vyplněny údaje o vozidle",
   fuel: "Vybrán druh paliva",
   contact: "Vyplněny kontaktní údaje",
+  "payment-form": "Vyplnění platebního formuláře",
+  "payment-info": "Platební údaje",
   summary: "Kontrola souhrnu objednávky",
   basket: "Kontrola nákupního košíku",
   create: "Objednávka vytvořena na státním webu",
@@ -245,8 +249,11 @@ type HumanLogEvent = {
 };
 type HumanLogGroup = {
   id: string;
+  orderId: string;
   country: string;
   plate: string;
+  kind: "vignette" | "passage";
+  productCode?: string;
   startedAt: string;
   latestTs: string;
   attempt: number;
@@ -261,6 +268,8 @@ type LogAttempt = {
   orderId: string;
   country: string;
   plate: string;
+  kind: "vignette" | "passage";
+  productCode?: string;
   runId?: string;
   batchKey?: string;
   startedAt: string;
@@ -275,13 +284,13 @@ function compactDuration(start: string, end: string) {
 
 function phaseForLog(entry: WorkerLogEntry): "claimed" | "portal" | "product" | "vehicle" | "summary" | "payment" | "terminal" | null {
   const step = typeof entry.step === "string" ? entry.step : "";
-  if (["Claimed line group", "Running vignette batch", "batch started"].includes(entry.message)) return "claimed";
-  if (entry.message === "adapter step") {
+  if (["Claimed line group", "Running vignette batch", "Running passage batch", "batch started"].includes(entry.message)) return "claimed";
+  if (entry.message === "adapter step" || entry.message === "passage adapter step") {
     if (["home", "landing", "auth", "mode"].includes(step)) return "portal";
-    if (["product", "vignette", "create"].includes(step)) return "product";
-    if (["form", "vehicle", "fuel", "contact"].includes(step)) return "vehicle";
+    if (["product", "vignette", "create", "configuration"].includes(step)) return "product";
+    if (["form", "vehicle", "fuel", "contact", "payment-form"].includes(step)) return "vehicle";
     if (["summary", "basket"].includes(step)) return "summary";
-    if (["payment", "confirmation", "purchase"].includes(step)) return "payment";
+    if (["payment", "confirmation", "purchase", "payment-info"].includes(step)) return "payment";
   }
   if (entry.message === "batch finished" || entry.message === "purchase failed") return "terminal";
   if (/(payment|card|3ds|captcha|checkout|gateway|bank approval)/i.test(entry.message)) return "payment";
@@ -330,7 +339,7 @@ function buildHumanLogGroups(logs: WorkerLogEntry[]): HumanLogGroup[] {
 
   for (const entry of ordered) {
     if (entry.message === "Claimed line group" && typeof entry.orderId === "string") claims.set(entry.orderId, entry);
-    if (entry.message === "Running vignette batch" && typeof entry.orderId === "string" && typeof entry.country === "string" && typeof entry.plate === "string") {
+    if (BATCH_START_MESSAGES.has(entry.message) && typeof entry.orderId === "string" && typeof entry.country === "string" && typeof entry.plate === "string") {
       const runId = typeof entry.runId === "string" ? entry.runId : undefined;
       const batchKey = typeof entry.batchKey === "string" ? entry.batchKey : undefined;
       const existing = (runId && byRunId.get(runId)) || (batchKey && byBatchKey.get(batchKey));
@@ -344,6 +353,8 @@ function buildHumanLogGroups(logs: WorkerLogEntry[]): HumanLogGroup[] {
         orderId: entry.orderId,
         country: entry.country,
         plate: entry.plate,
+        kind: entry.message === "Running passage batch" ? "passage" : "vignette",
+        productCode: typeof entry.productCode === "string" ? entry.productCode : undefined,
         runId,
         batchKey,
         startedAt: entry.ts,
@@ -368,20 +379,23 @@ function buildHumanLogGroups(logs: WorkerLogEntry[]): HumanLogGroup[] {
   const totals = new Map<string, number>();
   const positions = new Map<string, number>();
   for (const attempt of attempts) {
-    const key = `${attempt.orderId}:${attempt.country}`;
+    const key = `${attempt.orderId}:${attempt.country}:${attempt.kind}:${attempt.productCode ?? ""}`;
     totals.set(key, (totals.get(key) ?? 0) + 1);
   }
 
-  return attempts.map(attempt => {
-    const key = `${attempt.orderId}:${attempt.country}`;
+  const groups = attempts.map(attempt => {
+    const key = `${attempt.orderId}:${attempt.country}:${attempt.kind}:${attempt.productCode ?? ""}`;
     const number = (positions.get(key) ?? 0) + 1;
     positions.set(key, number);
     const { events, status } = canonicalAttemptEvents(attempt);
     const latestTs = attempt.logs.at(-1)?.ts ?? attempt.startedAt;
     return {
       id: `${attempt.orderId}:${attempt.country}:${attempt.id}`,
+      orderId: attempt.orderId,
       country: attempt.country,
       plate: attempt.plate,
+      kind: attempt.kind,
+      productCode: attempt.productCode,
       startedAt: attempt.startedAt,
       latestTs,
       attempt: number,
@@ -390,7 +404,50 @@ function buildHumanLogGroups(logs: WorkerLogEntry[]): HumanLogGroup[] {
       duration: compactDuration(attempt.startedAt, latestTs),
       events,
     };
-  }).filter(group => group.events.length).sort((a, b) => Date.parse(b.latestTs) - Date.parse(a.latestTs)).slice(0, 30);
+  }).filter(group => group.events.length).sort((a, b) => Date.parse(b.latestTs) - Date.parse(a.latestTs));
+
+  return groups;
+}
+
+function logDayKey(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp.slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatLogDayLabel(dayKey: string, now = Date.now()) {
+  const date = new Date(`${dayKey}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return dayKey;
+  const today = new Date(now);
+  const yesterday = new Date(now);
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(date, today)) return "Dnes";
+  if (sameDay(date, yesterday)) return "Včera";
+  return date.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" });
+}
+
+type HumanLogDaySection = {
+  dayKey: string;
+  label: string;
+  groups: HumanLogGroup[];
+};
+
+function buildHumanLogDaySections(groups: HumanLogGroup[], now = Date.now()): HumanLogDaySection[] {
+  const sections: HumanLogDaySection[] = [];
+  for (const group of groups) {
+    const dayKey = logDayKey(group.latestTs);
+    const current = sections.at(-1);
+    if (current?.dayKey === dayKey) {
+      current.groups.push(group);
+      continue;
+    }
+    sections.push({ dayKey, label: formatLogDayLabel(dayKey, now), groups: [group] });
+  }
+  return sections;
 }
 
 type ItemTimelineEvent = {
@@ -417,7 +474,8 @@ function timelineTime(timestamp?: string) {
 function itemLogLabel(entry: WorkerLogEntry) {
   const step = typeof entry.step === "string" ? entry.step : "";
   switch (entry.message) {
-    case "adapter step": return stepLabels[step] ?? `Krok: ${step || "zpracování"}`;
+    case "adapter step":
+    case "passage adapter step": return stepLabels[step] ?? `Krok: ${step || "zpracování"}`;
     case "Starting card payment": return "Platba zahájena";
     case "Card submitted on gateway": return "Platební údaje odeslány";
     case "3DS challenge detected":
@@ -1084,6 +1142,7 @@ function LiveLog({ expand, expanded = false }: { expand: () => void; expanded?: 
       }));
   const latestLogAt = liveLogs[0]?.ts;
   const humanGroups: HumanLogGroup[] = buildHumanLogGroups(liveLogs);
+  const humanDaySections = buildHumanLogDaySections(humanGroups, now);
 
   const selectTechnicalLog = (eventId: string) => {
     setSelected(eventId);
@@ -1103,15 +1162,23 @@ function LiveLog({ expand, expanded = false }: { expand: () => void; expanded?: 
         <div className="human-log">
           <h3>Průběh</h3>
           <div className="human-groups">
-            {humanGroups.map(group => <div className={`human-group ${expandedGroup === group.id ? "open" : ""}`} key={group.id}>
-              <button className="log-group-toggle" onClick={() => setExpandedGroup(expandedGroup === group.id ? "" : group.id)}>
-                <Flag code={group.country} />
-                <strong>{group.country} · {group.plate}</strong>
-                <span className={`group-result ${group.status}`}>{group.totalAttempts > 1 ? `Pokus ${group.attempt} · ` : ""}{group.status === "done" ? "Dokončeno" : group.status === "failed" ? "Selhalo" : "Probíhá"} · {group.status === "processing" ? compactDuration(group.startedAt, new Date(now).toISOString()) : group.duration}</span>
-                {expandedGroup === group.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              </button>
-              {expandedGroup === group.id && <div className="group-steps">{group.events.map(event => <button key={event.id} className={selected === event.id ? "selected" : ""} onClick={() => selectTechnicalLog(event.id)}><time>{event.time}</time><span className={event.tone}>{event.label}</span>{event.rawCount > 1 && <em>{event.rawCount} záznamů</em>}</button>)}</div>}
-            </div>)}
+            {humanDaySections.map((section, sectionIndex) => (
+              <div className={`human-day${sectionIndex === 0 ? " first" : ""}`} key={section.dayKey}>
+                {sectionIndex > 0 && <div className="human-day-rule" role="separator" />}
+                <div className="human-day-label">{section.label}</div>
+                {section.groups.map(group => (
+                  <div className={`human-group ${expandedGroup === group.id ? "open" : ""}`} key={group.id}>
+                    <button className="log-group-toggle" onClick={() => setExpandedGroup(expandedGroup === group.id ? "" : group.id)}>
+                      <Flag code={group.country} />
+                      <strong>{group.country} · {group.plate}{group.kind === "passage" ? " · most/tunel" : ""}</strong>
+                      <span className={`group-result ${group.status}`}>{group.totalAttempts > 1 ? `Pokus ${group.attempt} · ` : ""}{group.status === "done" ? "Dokončeno" : group.status === "failed" ? "Selhalo" : "Probíhá"} · {group.status === "processing" ? compactDuration(group.startedAt, new Date(now).toISOString()) : group.duration}</span>
+                      {expandedGroup === group.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </button>
+                    {expandedGroup === group.id && <div className="group-steps">{group.events.map(event => <button key={event.id} className={selected === event.id ? "selected" : ""} onClick={() => selectTechnicalLog(event.id)}><time>{event.time}</time><span className={event.tone}>{event.label}</span>{event.rawCount > 1 && <em>{event.rawCount} záznamů</em>}</button>)}</div>}
+                  </div>
+                ))}
+              </div>
+            ))}
             {!humanGroups.length && <div className="empty-log-groups">V dostupném logu zatím není žádná položka se SPZ.</div>}
           </div>
         </div>

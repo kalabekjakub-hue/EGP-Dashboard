@@ -81,6 +81,10 @@
 .timeline .waiting i{background:#d7a936;box-shadow:0 0 0 4px #fff3cf}
 
 .human-groups{padding:6px 8px 10px}
+.human-day+.human-day{margin-top:4px}
+.human-day-rule{height:1px;margin:8px 6px 6px;background:#e2eae3}
+.human-day-label{padding:2px 9px 6px;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#8a918b}
+.human-day.first .human-day-label{padding-top:0}
 .human-group{border:1px solid transparent;border-radius:13px;overflow:hidden}
 .human-group+.human-group{margin-top:3px}
 .human-group.open{border-color:#dce9dd;background:#fbfefb}
