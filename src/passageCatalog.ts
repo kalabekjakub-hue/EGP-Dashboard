@@ -33,7 +33,33 @@ function readableFallback(id: string) {
     .join(" ");
 }
 
+/** Worker `productCode` from live logs → catalog toll_id used for display names. */
+const PRODUCT_CODE_TO_TOLL_ID: Record<string, string> = {
+  "at-brenner-1trip": "at-a13-brenner",
+  "at-brenner-2trip": "at-a13-brenner",
+  "at-tauern-1trip": "at-a10-tauern",
+  "at-tauern-2trip": "at-a10-tauern",
+  "at-arlberg-1trip": "at-s16-arlberg",
+  "at-arlberg-2trip": "at-s16-arlberg",
+  "at-karawanken-1trip": "at-a11-karawanken",
+  "at-bosruck-1trip": "at-a9-bosruck",
+  "at-bosruck-2trip": "at-a9-bosruck",
+  "at-gleinalm-1trip": "at-a9-gleinalm",
+  "at-gleinalm-2trip": "at-a9-gleinalm",
+  "ro-fetesti-peaj": "ro-fetesti-peaj",
+  "ro-giurgiu-bridge": "ro-giurgiu-ruse",
+  "ro-calafat-vidin-bridge": "ro-calafat-vidin",
+  "bg-vidin-bridge": "bg-vidin-calafat",
+  "bg-ruse-bridge": "bg-ruse-giurgiu",
+};
+
 export function passageDisplay(tollId?: string): PassageDisplay {
   if (!tollId) return { name: "Most nebo placený úsek", kind: "toll_section" };
   return PASSAGES[tollId.trim().toLowerCase()] ?? { name: readableFallback(tollId), kind: "toll_section" };
+}
+
+export function passageDisplayFromProductCode(productCode?: string): PassageDisplay {
+  if (!productCode) return passageDisplay();
+  const key = productCode.trim().toLowerCase();
+  return passageDisplay(PRODUCT_CODE_TO_TOLL_ID[key] ?? key);
 }

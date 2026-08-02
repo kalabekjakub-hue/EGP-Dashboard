@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { orders as demoOrders, portalLinks, type Order, type OrderItem, type OrderStatus } from "./data";
 import { EditorialArticleEditor, EditorialHome, EditorialPreview, EditorialSettingsModal } from "./editorial";
+import { passageDisplayFromProductCode } from "./passageCatalog";
 
 type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article";
 
@@ -448,6 +449,11 @@ function buildHumanLogDaySections(groups: HumanLogGroup[], now = Date.now()): Hu
     sections.push({ dayKey, label: formatLogDayLabel(dayKey, now), groups: [group] });
   }
   return sections;
+}
+
+function humanLogGroupTitle(group: HumanLogGroup) {
+  if (group.kind === "passage") return `${passageDisplayFromProductCode(group.productCode).name} · ${group.plate}`;
+  return `${group.country} · ${group.plate}`;
 }
 
 type ItemTimelineEvent = {
@@ -1170,7 +1176,7 @@ function LiveLog({ expand, expanded = false }: { expand: () => void; expanded?: 
                   <div className={`human-group ${expandedGroup === group.id ? "open" : ""}`} key={group.id}>
                     <button className="log-group-toggle" onClick={() => setExpandedGroup(expandedGroup === group.id ? "" : group.id)}>
                       <Flag code={group.country} />
-                      <strong>{group.country} · {group.plate}{group.kind === "passage" ? " · most/tunel" : ""}</strong>
+                      <strong>{humanLogGroupTitle(group)}</strong>
                       <span className={`group-result ${group.status}`}>{group.totalAttempts > 1 ? `Pokus ${group.attempt} · ` : ""}{group.status === "done" ? "Dokončeno" : group.status === "failed" ? "Selhalo" : "Probíhá"} · {group.status === "processing" ? compactDuration(group.startedAt, new Date(now).toISOString()) : group.duration}</span>
                       {expandedGroup === group.id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </button>
