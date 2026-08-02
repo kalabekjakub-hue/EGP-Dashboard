@@ -149,6 +149,19 @@ type OrderItemNote = {
   created_at: string;
 };
 
+function manualAuditLabel(entry: ManualFulfillmentAudit, items: OrderItem[]) {
+  const item = items.find(candidate => candidate.id === entry.item_id);
+  const isPassage = entry.item_source === "order_bridge_toll_items"
+    || item?.source === "order_bridge_toll_items"
+    || (item?.itemKind != null && item.itemKind !== "vignette");
+  if (isPassage) {
+    const name = item?.product?.trim() || entry.country_code;
+    return name ? `${name} · ` : "";
+  }
+  const code = item?.displayCode ?? item?.country ?? entry.country_code;
+  return code ? `${code} · ` : "";
+}
+
 function usePostHogAnalytics() {
   const [data, setData] = useState<PostHogAnalytics | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -1583,7 +1596,7 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
           {manualAudit.length ? manualAudit.map(entry => <article key={entry.id}>
             <span className="manual-audit-icon"><CheckCircle2 size={17} /></span>
             <div>
-              <strong>{entry.country_code ? `${entry.country_code} · ` : ""}Označeno ručně jako FULFILLED</strong>
+              <strong>{manualAuditLabel(entry, order.items)}Označeno ručně jako FULFILLED</strong>
               <small>Předchozí stav: {entry.previous_status || "neuveden"}</small>
               {entry.note?.trim() && <p className="manual-audit-note">{entry.note.trim()}</p>}
             </div>
