@@ -119,6 +119,7 @@ type PostHogAnalytics = {
     pageviewSessions: number; sessionsWithAnyEvent: number; pageviewsWithUtmSource: number; fbclidVisitors: number;
   };
   financeByCurrency: Array<{ currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>;
+  ordersByRegistrationCountry: Array<{ code: string; orders: number }>;
 };
 
 type AffiliateAnalytics = {
@@ -1137,6 +1138,7 @@ function PostHogDetail({ back }: { back: () => void }) {
       <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta v PostHogu</h2><p>Relace; zaplacené objednávky ze Supabase jsou vedené samostatně</p></div></div>{[
         ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zobrazené potvrzení platby", summary.paidViewedSessions],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Aktivita kroků</h2><p>Unikátní relace · vpravo počet událostí</p></div></div>{data.checkoutSteps.map(step => <div className="rank-row" key={step.name}><span>{analyticsLabel(step.name)} · {step.sessions} relací</span><i><b style={{ width: `${step.sessions / maxStep * 100}%` }} /></i><strong>{step.events}</strong></div>)}</article></div>
+      <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Země registrace</h2><p>Zaplacené objednávky podle registrační země vozidla</p></div></div>{(data.ordersByRegistrationCountry ?? []).map(country => <div className="device-row country-analytics" key={country.code}><span>{country.code !== "XX" && <Flag code={country.code} />}{countryName(country.code)}</span><strong>{integerFormat.format(country.orders)}</strong></div>)}</article>
     </section>}
     {tab === "finance" && <section className="analytics-tab-content finance-analytics">
       <div className="analytics-stat-grid finance-stats">

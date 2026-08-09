@@ -1156,6 +1156,7 @@ type PostHogAnalytics = {
     fbclidVisitors: number;
   };
   financeByCurrency: Array<{ currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>;
+  ordersByRegistrationCountry: Array<{ code: string; orders: number }>;
 };
 
 let postHogCache: { at: number; data: PostHogAnalytics } | null = null;
@@ -1215,13 +1216,14 @@ type PaidOrderAnalyticsRow = {
   vignettes_subtotal_minor: number;
   processing_fee_minor: number;
   flex_amount_minor: number;
+  registration_country?: string | null;
 };
 
 async function loadPaidOrderAnalytics(since: Date) {
   const { url, key } = loadWorkerEnv();
   if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled,vignettes_subtotal_minor,processing_fee_minor,flex_amount_minor&paid_at=gte.${encodeURIComponent(since.toISOString())}&order=paid_at.asc&limit=5000`, { headers });
+  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled,vignettes_subtotal_minor,processing_fee_minor,flex_amount_minor,registration_country&paid_at=gte.${encodeURIComponent(since.toISOString())}&order=paid_at.asc&limit=5000`, { headers });
   if (!response.ok) throw new Error(`Paid orders API ${response.status}`);
   const orders = await response.json() as PaidOrderAnalyticsRow[];
   if (!orders.length) return { orders, vignettes: [] as Array<{ order_id: string }>, tolls: [] as Array<{ order_id: string }> };
@@ -1348,6 +1350,7 @@ function postHogReadApi(env: Record<string, string>) {
           const trafficByDay = new Map(dailyRows.map(([date, visitors, dailyCheckouts]) => [String(date), { visitors: Number(visitors ?? 0), checkouts: Number(dailyCheckouts ?? 0) }]));
           const dailyDates = [...new Set([...trafficByDay.keys(), ...paidByDay.keys()])].sort();
           const financeCurrencies = new Map<string, { currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>();
+          const registrationCountries = new Map<string, number>();
           for (const order of currentOrders) {
             const currency = order.currency.toUpperCase();
             const entry = financeCurrencies.get(currency) ?? { currency, orders: 0, gross: 0, products: 0, processing: 0, plus: 0 };
@@ -1357,6 +1360,8 @@ function postHogReadApi(env: Record<string, string>) {
             entry.processing += order.processing_fee_minor / 100;
             entry.plus += order.flex_amount_minor / 100;
             financeCurrencies.set(currency, entry);
+            const code = (order.registration_country || "XX").trim().toUpperCase() || "XX";
+            registrationCountries.set(code, (registrationCountries.get(code) ?? 0) + 1);
           }
           const sourceChannels = new Map<string, { name: string; sessions: number; visitors: number; checkouts: number; payments: number }>();
           for (const [rawName, sessions, visitors, sourceCheckouts, sourcePayments] of sourceRows) {
@@ -1451,6 +1456,9 @@ function postHogReadApi(env: Record<string, string>) {
               maxCheckoutEventsPerSession: Number(duplicates[1] ?? 0),
             },
             financeByCurrency: [...financeCurrencies.values()].sort((a, b) => b.gross - a.gross),
+            ordersByRegistrationCountry: [...registrationCountries.entries()]
+              .map(([code, orders]) => ({ code, orders }))
+              .sort((a, b) => b.orders - a.orders || a.code.localeCompare(b.code)),
           };
           postHogCache = { at: Date.now(), data };
           res.statusCode = 200;
