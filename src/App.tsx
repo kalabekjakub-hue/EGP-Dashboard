@@ -1114,10 +1114,11 @@ function PostHogDetail({ back }: { back: () => void }) {
           <path className="checkout" d={checkoutPath} /><path className="paid" d={paidPath} />
         </svg>
       </article>
-      <article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Průchod checkoutem</h2><p>Unikátní relace v PostHogu</p></div></div>{[
+      <article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Průchod checkoutem</h2><p>Relace z PostHogu · poslední krok jsou skutečně zaplacené objednávky ze Supabase</p></div></div>{[
         ["Vstup do checkoutu", summary.checkouts],
         ["Zahájení platby", summary.paymentStarted],
         ["Zobrazení potvrzení platby", summary.paidViewedSessions],
+        ["Zaplacené objednávky", summary.paidOrders],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article>
       <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Rychlý souhrn</h2><p>Aktivita návštěvníků</p></div></div>{[
         ["Návštěvy stránek", summary.pageviews], ["Relace", summary.sessions], ["Vyhledané trasy", summary.routeSearches], ["Spočítané trasy", summary.routesCalculated],
@@ -1135,10 +1136,10 @@ function PostHogDetail({ back }: { back: () => void }) {
         <AnalyticsStat label="Dálniční známky" value={integerFormat.format(summary.vignettes)} note="zaplacených položek" />
         <AnalyticsStat label="Mosty a tunely" value={integerFormat.format(summary.bridgeTolls)} note="zaplacených položek" />
       </div>
-      <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta v PostHogu</h2><p>Relace; zaplacené objednávky ze Supabase jsou vedené samostatně</p></div></div>{[
-        ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zobrazené potvrzení platby", summary.paidViewedSessions],
+      <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta</h2><p>Relace z PostHogu · poslední krok jsou skutečně zaplacené objednávky ze Supabase</p></div></div>{[
+        ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zobrazené potvrzení platby", summary.paidViewedSessions], ["Zaplacené objednávky", summary.paidOrders],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Aktivita kroků</h2><p>Unikátní relace · vpravo počet událostí</p></div></div>{data.checkoutSteps.map(step => <div className="rank-row" key={step.name}><span>{analyticsLabel(step.name)} · {step.sessions} relací</span><i><b style={{ width: `${step.sessions / maxStep * 100}%` }} /></i><strong>{step.events}</strong></div>)}</article></div>
-      <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Země registrace</h2><p>Zaplacené objednávky podle registrační země vozidla</p></div></div>{(data.ordersByRegistrationCountry ?? []).map(country => <div className="device-row country-analytics" key={country.code}><span>{country.code !== "XX" && <Flag code={country.code} />}{countryName(country.code)}</span><strong>{integerFormat.format(country.orders)}</strong></div>)}</article>
+      <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Země registrace</h2><p>{integerFormat.format(summary.paidOrders)} zaplacených objednávek podle registrační země vozidla</p></div></div>{(data.ordersByRegistrationCountry ?? []).map(country => <div className="device-row country-analytics" key={country.code}><span>{country.code !== "XX" && <Flag code={country.code} />}{countryName(country.code)}</span><strong>{integerFormat.format(country.orders)}</strong></div>)}</article>
     </section>}
     {tab === "finance" && <section className="analytics-tab-content finance-analytics">
       <div className="analytics-stat-grid finance-stats">
