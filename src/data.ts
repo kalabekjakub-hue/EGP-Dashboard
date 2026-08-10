@@ -1,4 +1,4 @@
-export type OrderStatus = "awaiting_payment" | "waiting" | "processing" | "fulfilled" | "failed";
+export type OrderStatus = "awaiting_payment" | "plus" | "waiting" | "processing" | "fulfilled" | "failed";
 
 export type OrderItem = {
   id?: string;
@@ -64,6 +64,8 @@ export const orders: Order[] = [
     email: "jan.novak@example.com",
     createdAt: "12. 7. 2026, 14:31",
     paidAt: "12. 7. 2026, 14:32",
+    paidAtIso: "2026-07-12T12:32:00.000Z",
+    createdAtIso: "2026-07-12T12:31:00.000Z",
     total: 31,
     plus: true,
     locale: "cs-CZ",
@@ -82,6 +84,8 @@ export const orders: Order[] = [
     email: "maria.kovacova@example.com",
     createdAt: "12. 7. 2026, 13:54",
     paidAt: "12. 7. 2026, 13:55",
+    paidAtIso: "2026-07-12T11:55:00.000Z",
+    createdAtIso: "2026-07-12T11:54:00.000Z",
     total: 15.5,
     plus: false,
     locale: "sk-SK",
@@ -99,6 +103,8 @@ export const orders: Order[] = [
     email: "lena.becker@example.com",
     createdAt: "12. 7. 2026, 12:10",
     paidAt: "12. 7. 2026, 12:11",
+    paidAtIso: "2026-07-12T10:11:00.000Z",
+    createdAtIso: "2026-07-12T10:10:00.000Z",
     total: 9.3,
     plus: false,
     locale: "de-DE",
@@ -116,12 +122,14 @@ export const orders: Order[] = [
     email: "balazs.toth@example.com",
     createdAt: "12. 7. 2026, 10:42",
     paidAt: "12. 7. 2026, 10:43",
+    paidAtIso: "2026-07-12T08:43:00.000Z",
+    createdAtIso: "2026-07-12T08:42:00.000Z",
     total: 18.4,
     plus: true,
     locale: "hu-HU",
-    status: "fulfilled",
+    status: "plus",
     items: [
-      { country: "HU", flag: "🇭🇺", product: "Měsíční známka", validFrom: "13. 7. 2026", validTo: "12. 8. 2026", price: 18.4, status: "fulfilled", duration: "56 s", reference: "HU-881203", invoice: "ready" },
+      { country: "HU", flag: "🇭🇺", product: "Měsíční známka", validFrom: "20. 7. 2026", validTo: "19. 8. 2026", price: 18.4, status: "plus", currentStep: "Plus T−15", invoice: "waiting" },
     ],
   },
   {
@@ -133,6 +141,8 @@ export const orders: Order[] = [
     email: "piotr.nowak@example.com",
     createdAt: "12. 7. 2026, 09:08",
     paidAt: "12. 7. 2026, 09:09",
+    paidAtIso: "2026-07-12T07:09:00.000Z",
+    createdAtIso: "2026-07-12T07:08:00.000Z",
     total: 12.4,
     plus: false,
     locale: "pl-PL",

@@ -286,10 +286,25 @@ function duration(start?: string, end?: string) {
   return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
 }
 
-function itemStatus(item: RawItem) {
-  if (item.status === "fulfilled") return "fulfilled";
-  if (item.status === "failed" || item.failed_at) return "failed";
-  if (item.engine_submitted_at) return "processing";
+function itemStatus(item: RawItem, flexEnabled = false) {
+  const raw = item.status.toLowerCase().replace(/[\s-]+/g, "_");
+  if (raw === "fulfilled") return "fulfilled";
+  if (raw === "failed" || item.failed_at) return "failed";
+  // Plus T−15 hold, or Plus far-future window — not released to the worker yet.
+  if (raw === "held" || (raw === "waiting" && flexEnabled)) return "plus";
+  // Released to worker queue or already claimed.
+  if (item.engine_submitted_at || raw === "pending" || raw === "processing") return "processing";
+  return "waiting";
+}
+
+function orderStatus(rawOrderStatus: string, fulfillmentStatus: string | undefined, items: Array<{ status: string }>) {
+  if (["pending", "awaiting_payment"].includes(rawOrderStatus)) return "awaiting_payment";
+  if (items.some(item => item.status === "failed")) return "failed";
+  if (items.some(item => item.status === "processing")) return "processing";
+  if (items.some(item => item.status === "plus")) return "plus";
+  if (items.length && items.every(item => item.status === "fulfilled")) return "fulfilled";
+  // Fallback when line items are still open but order-level hold is set.
+  if ((fulfillmentStatus ?? "").toLowerCase() === "held") return "plus";
   return "waiting";
 }
 
@@ -297,7 +312,7 @@ function supabaseReadApi() {
   return {
     name: "eurogopass-read-api",
     configureServer(server: import("vite").ViteDevServer) {
-      server.middlewares.use("/api/orders", async (_req, res) => {
+      server.middlewares.use("/api/orders", async (req, res) => {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Cache-Control", "no-store");
         try {
@@ -305,7 +320,10 @@ function supabaseReadApi() {
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
           const headers = { apikey: key, Authorization: `Bearer ${key}` };
           const orderSelect = "id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,invoice_pdf_path,last_error,vehicle_type,fuel_type,vehicle_vin";
-          const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=200`, { headers });
+          const requestUrl = new URL(req.url ?? "/", "http://localhost");
+          const requestedLimit = Number(requestUrl.searchParams.get("limit") ?? 200);
+          const orderLimit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 500) : 200;
+          const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=${orderLimit}`, { headers });
           if (!orderResponse.ok) throw new Error(`Orders API ${orderResponse.status}`);
           const rawOrders = await orderResponse.json() as RawOrder[];
           const ecbRates = await loadEcbRates();
@@ -361,9 +379,9 @@ function supabaseReadApi() {
             matches.forEach(match => hiddenPendingIds.add(match.id));
             originalPendingCreatedAt.set(paidOrder.id, matches.reduce((earliest, match) => Date.parse(match.created_at) < Date.parse(earliest) ? match.created_at : earliest, matches[0].created_at));
           }
-          const data = rawOrders.filter(order => !hiddenPendingIds.has(order.id)).slice(0, 50).map(order => {
+          const data = rawOrders.filter(order => !hiddenPendingIds.has(order.id)).map(order => {
             const items = allItems.filter(item => item.order_id === order.id).map(item => {
-              const status = itemStatus(item);
+              const status = itemStatus(item, order.flex_enabled);
               const passage = item.source === "order_bridge_toll_items" ? passageDisplay(item.toll_id) : undefined;
               return {
                 id: item.id,
@@ -380,7 +398,7 @@ function supabaseReadApi() {
                 price: item.price_eur_minor / 100,
                 status,
                 duration: duration(item.engine_submitted_at, item.fulfilled_at ?? item.failed_at),
-                currentStep: status === "processing" ? "Zpracování" : undefined,
+                currentStep: status === "processing" ? "Zpracování" : status === "plus" ? "Plus T−15" : undefined,
                 reference: item.state_reference,
                 invoice: item.status === "fulfilled" ? "ready" : "waiting",
                 engineSubmittedAt: item.engine_submitted_at,
@@ -393,10 +411,7 @@ function supabaseReadApi() {
               };
             });
             const rawOrderStatus = order.status.toLowerCase().replace(/[\s-]+/g, "_");
-            const status = ["pending", "awaiting_payment"].includes(rawOrderStatus) ? "awaiting_payment"
-              : items.some(item => item.status === "failed") ? "failed"
-              : items.some(item => item.status === "processing") ? "processing"
-              : items.length && items.every(item => item.status === "fulfilled") ? "fulfilled" : "waiting";
+            const status = orderStatus(rawOrderStatus, order.fulfillment_status, items);
             const conversionDate = order.paid_at ?? order.created_at;
             const total = order.amount_total_minor / 100;
             const profit = order.processing_fee_minor / 100;
@@ -1217,15 +1232,29 @@ type PaidOrderAnalyticsRow = {
   processing_fee_minor: number;
   flex_amount_minor: number;
   registration_country?: string | null;
+  plate?: string | null;
 };
 
-async function loadPaidOrderAnalytics(since: Date) {
+const ANALYTICS_EXCLUDED_PLATES = new Set(["AAAAA", "AAAAAA", "7B33476", "7B33479", "3BM9106"]);
+
+function normalizeAnalyticsPlate(plate: string) {
+  return plate.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function isAnalyticsExcludedPlate(plate?: string | null) {
+  return ANALYTICS_EXCLUDED_PLATES.has(normalizeAnalyticsPlate(plate ?? ""));
+}
+
+async function loadPaidOrderAnalytics(since?: Date) {
   const { url, key } = loadWorkerEnv();
   if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
-  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled,vignettes_subtotal_minor,processing_fee_minor,flex_amount_minor,registration_country&paid_at=gte.${encodeURIComponent(since.toISOString())}&order=paid_at.asc&limit=5000`, { headers });
+  const paidFilter = since
+    ? `paid_at=gte.${encodeURIComponent(since.toISOString())}`
+    : "paid_at=not.is.null";
+  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled,vignettes_subtotal_minor,processing_fee_minor,flex_amount_minor,registration_country,plate&${paidFilter}&order=paid_at.asc&limit=5000`, { headers });
   if (!response.ok) throw new Error(`Paid orders API ${response.status}`);
-  const orders = await response.json() as PaidOrderAnalyticsRow[];
+  const orders = (await response.json() as PaidOrderAnalyticsRow[]).filter(order => !isAnalyticsExcludedPlate(order.plate));
   if (!orders.length) return { orders, vignettes: [] as Array<{ order_id: string }>, tolls: [] as Array<{ order_id: string }> };
   const ids = encodeURIComponent(`(${orders.map(order => order.id).join(",")})`);
   const [vignettesResponse, tollsResponse] = await Promise.all([
@@ -1327,13 +1356,13 @@ function postHogReadApi(env: Record<string, string>) {
             runQuery("SELECT uniqExact(distinct_id) AS tracked_identities, uniqExactIf(distinct_id, event = 'checkout_entered') AS checkout_identities, uniqExactIf(distinct_id, event = 'checkout_entered' AND distinct_id IN (SELECT distinct_id FROM events WHERE event = '$pageview' AND timestamp >= now() - INTERVAL 30 DAY)) AS checkout_with_pageview, uniqExactIf(coalesce(properties.$session_id, distinct_id), event = '$pageview') AS pageview_sessions, uniqExact(coalesce(properties.$session_id, distinct_id)) AS all_sessions, countIf(event = '$pageview' AND notEmpty(toString(properties.$utm_source))) AS pageviews_with_utm, uniqExactIf(distinct_id, event = '$pageview' AND positionCaseInsensitive(coalesce(properties.$current_url, ''), 'fbclid') > 0) AS fbclid_visitors FROM events WHERE timestamp >= now() - INTERVAL 30 DAY"),
             runQuery("SELECT countIf(event_count > 1) AS duplicate_sessions, max(event_count) AS max_per_session FROM (SELECT coalesce(properties.$session_id, distinct_id) AS session_id, count() AS event_count FROM events WHERE event = 'checkout_entered' AND timestamp >= now() - INTERVAL 30 DAY GROUP BY session_id)"),
             loadEcbRates(),
-            loadPaidOrderAnalytics(new Date(Math.max(previousSince.getTime(), analyticsProductionSince.getTime()))),
+            loadPaidOrderAnalytics(),
           ]);
           const row = summaryRows[0] ?? [];
           const previous = previousRows[0] ?? [];
           const checkouts = Number(row[3] ?? 0);
           const currentOrders = paidData.orders.filter(order => new Date(order.paid_at) >= currentSince);
-          const previousOrders = paidData.orders.filter(order => new Date(order.paid_at) < currentSince);
+          const previousOrders = paidData.orders.filter(order => new Date(order.paid_at) >= previousSince && new Date(order.paid_at) < currentSince);
           const funnelPaidOrders = currentOrders.filter(order => new Date(order.paid_at) >= analyticsTrackingSince).length;
           const currentIds = new Set(currentOrders.map(order => order.id));
           const paidOrders = currentOrders.length;
@@ -1350,7 +1379,6 @@ function postHogReadApi(env: Record<string, string>) {
           const trafficByDay = new Map(dailyRows.map(([date, visitors, dailyCheckouts]) => [String(date), { visitors: Number(visitors ?? 0), checkouts: Number(dailyCheckouts ?? 0) }]));
           const dailyDates = [...new Set([...trafficByDay.keys(), ...paidByDay.keys()])].sort();
           const financeCurrencies = new Map<string, { currency: string; orders: number; gross: number; products: number; processing: number; plus: number }>();
-          const registrationCountries = new Map<string, number>();
           for (const order of currentOrders) {
             const currency = order.currency.toUpperCase();
             const entry = financeCurrencies.get(currency) ?? { currency, orders: 0, gross: 0, products: 0, processing: 0, plus: 0 };
@@ -1360,6 +1388,9 @@ function postHogReadApi(env: Record<string, string>) {
             entry.processing += order.processing_fee_minor / 100;
             entry.plus += order.flex_amount_minor / 100;
             financeCurrencies.set(currency, entry);
+          }
+          const registrationCountries = new Map<string, number>();
+          for (const order of paidData.orders) {
             const code = (order.registration_country || "XX").trim().toUpperCase() || "XX";
             registrationCountries.set(code, (registrationCountries.get(code) ?? 0) + 1);
           }

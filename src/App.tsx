@@ -547,7 +547,9 @@ function buildItemTimeline(orderId: string, item: OrderItem, logs: WorkerLogEntr
   } else if (item.failedAt) {
     facts.push({ id: "failed", ts: item.failedAt, label: "Zpracování položky selhalo", status: "failed" });
   } else if (item.status === "processing") {
-    facts.push({ id: "processing", ts: item.engineSubmittedAt, label: "Zpracování právě probíhá", status: "active" });
+    facts.push({ id: "processing", ts: item.engineSubmittedAt, label: item.engineSubmittedAt ? "Zpracování právě probíhá" : "Ve frontě workeru", status: "active" });
+  } else if (item.status === "plus") {
+    facts.push({ id: "plus", label: "Plus — čeká na uvolnění (T−15)", status: "waiting" });
   } else if (item.status === "waiting") {
     facts.push({ id: "waiting", label: "Čeká na převzetí workerem", status: "waiting" });
   }
@@ -564,11 +566,21 @@ function buildItemTimeline(orderId: string, item: OrderItem, logs: WorkerLogEntr
 
 const statusLabels: Record<OrderStatus, string> = {
   awaiting_payment: "Čeká na platbu",
+  plus: "Plus",
   waiting: "Čeká na zpracování",
   processing: "Zpracovává se",
   fulfilled: "Dokončeno",
   failed: "Neúspěšná",
 };
+
+function previewOrderRank(status: OrderStatus) {
+  if (status === "processing") return 0;
+  if (status === "waiting") return 1;
+  if (status === "plus") return 2;
+  if (status === "failed") return 3;
+  if (status === "fulfilled") return 4;
+  return 5;
+}
 
 function shortId(id: string) {
   return `${id.slice(0, 5)}…${id.slice(-4)}`;
@@ -762,6 +774,7 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
         {order.items.map((item) => <div key={item.id ?? `${item.source}-${item.country}-${item.product}`}><Flag code={item.country} /><b>{item.product}</b><span>{item.displayCode ?? item.country}</span></div>)}
       </div>
       {order.status === "awaiting_payment" && <div className="awaiting-created"><Clock3 size={12} />Vytvořeno {order.createdAt}</div>}
+      {order.status === "plus" && <div className="plus-line"><Plus size={12} strokeWidth={3} />Čeká na T−15</div>}
       {order.status === "processing" && <div className="processing-line"><span className="live-pulse" />{order.items.find(i => i.status === "processing")?.country} · {order.items.find(i => i.status === "processing")?.currentStep}</div>}
     </button>
   );
@@ -773,7 +786,11 @@ function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; op
   const filtered = orderData.filter(order => !query || [order.id, order.plate.replace(/[\s-]/g, ""), order.email].some(value => value.toUpperCase().includes(normalized)));
   const previewOrders = filtered
     .filter(order => Boolean(order.paidAtIso) && order.status !== "awaiting_payment")
-    .sort((a, b) => Date.parse(b.paidAtIso ?? "") - Date.parse(a.paidAtIso ?? ""))
+    .sort((a, b) => {
+      const byRank = previewOrderRank(a.status) - previewOrderRank(b.status);
+      if (byRank !== 0) return byRank;
+      return Date.parse(b.paidAtIso ?? "") - Date.parse(a.paidAtIso ?? "");
+    })
     .slice(0, 3);
   return (
     <aside className="orders-column surface">
@@ -781,7 +798,7 @@ function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; op
       <div className="order-list">
         {previewOrders.length ? previewOrders.map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />) : <div className="empty">Žádná zaplacená objednávka nenalezena</div>}
       </div>
-      <button className="all-orders" onClick={showAll}>Všechny objednávky</button>
+      <button type="button" className="all-orders" onClick={showAll}>Všechny objednávky</button>
     </aside>
   );
 }
@@ -865,6 +882,7 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
       const prefix = `${item.country} · ${order.plate}`;
       if (item.status === "failed" && pragueDay(item.failedAt) === today) incidents.push({ id: `failed:${order.id}:${item.country}`, tone: "error", title: `${prefix} selhalo`, detail: item.lastError || "Položka skončila chybou", orderId: order.id });
       if (order.paidAtIso && pragueDay(order.paidAtIso) === today && item.status === "waiting" && !item.engineSubmittedAt && minutesSince(order.paidAtIso) > 5) incidents.push({ id: `unclaimed:${order.id}:${item.country}`, tone: "warning", title: `${prefix} čeká na worker`, detail: "Zaplaceno, ale položka nebyla převzata", orderId: order.id });
+      if (order.paidAtIso && pragueDay(order.paidAtIso) === today && item.status === "processing" && !item.engineSubmittedAt && minutesSince(order.paidAtIso) > 5) incidents.push({ id: `unclaimed:${order.id}:${item.country}`, tone: "warning", title: `${prefix} čeká na worker`, detail: "Ve frontě, ale položka nebyla převzata", orderId: order.id });
       if (item.status === "processing" && item.engineSubmittedAt && pragueDay(item.engineSubmittedAt) === today && minutesSince(item.engineSubmittedAt) > 15) incidents.push({ id: `slow:${order.id}:${item.country}`, tone: "warning", title: `${prefix} trvá dlouho`, detail: `Zpracování běží ${Math.round(minutesSince(item.engineSubmittedAt))} minut`, orderId: order.id });
       if (item.status === "fulfilled" && item.fulfilledAt && pragueDay(item.fulfilledAt) === today && item.pdfAvailable === false) incidents.push({ id: `pdf:${order.id}:${item.country}`, tone: "warning", title: `${prefix} nemá doklad`, detail: "V Supabase není přiřazený doklad k položce", orderId: order.id, target: "documents" });
       if (item.status === "fulfilled" && item.fulfilledAt && pragueDay(item.fulfilledAt) === today && item.screenshotsAvailable === false) incidents.push({ id: `shots:${order.id}:${item.country}`, tone: "warning", title: `${prefix} nemá screenshoty`, detail: "Worker neuložil screenshoty kroků", orderId: order.id, target: "screenshots" });
@@ -1065,6 +1083,9 @@ function PostHogDetail({ back }: { back: () => void }) {
   const maxStep = Math.max(...data.checkoutSteps.map(step => step.sessions), 1);
   const maxLanding = Math.max(...data.landingPages.map(page => page.sessions), 1);
   const maxHourly = Math.max(...data.hourly.map(hour => hour.sessions), 1);
+  const registrationCountries = data.ordersByRegistrationCountry ?? [];
+  const registrationOrders = registrationCountries.reduce((sum, country) => sum + country.orders, 0);
+  const maxRegistrationOrders = Math.max(...registrationCountries.map(country => country.orders), 1);
   const chartMax = Math.max(...data.daily.map(day => day.checkouts), ...data.daily.map(day => day.paidOrders), 1);
   const chartWidth = 800;
   const chartHeight = 240;
@@ -1139,7 +1160,31 @@ function PostHogDetail({ back }: { back: () => void }) {
       <div className="analytics-two-column"><article className="analytics-funnel surface"><div className="analytics-card-head"><div><h2>Konverzní cesta</h2><p>Relace z PostHogu · poslední krok jsou skutečně zaplacené objednávky ze Supabase</p></div></div>{[
         ["Vstupy do checkoutu", summary.checkouts], ["Zahájené platby", summary.paymentStarted], ["Zobrazené potvrzení platby", summary.paidViewedSessions], ["Zaplacené objednávky", summary.paidOrders],
       ].map(([label, value]) => <div className="funnel-row" key={label}><div><span>{label}</span><strong>{integerFormat.format(Number(value))}</strong></div><i><b style={{ width: `${Math.max(4, Number(value) / maxFunnel * 100)}%` }} /></i><small>{Math.round(Number(value) / maxFunnel * 100)} % ze vstupů</small></div>)}</article><article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Aktivita kroků</h2><p>Unikátní relace · vpravo počet událostí</p></div></div>{data.checkoutSteps.map(step => <div className="rank-row" key={step.name}><span>{analyticsLabel(step.name)} · {step.sessions} relací</span><i><b style={{ width: `${step.sessions / maxStep * 100}%` }} /></i><strong>{step.events}</strong></div>)}</article></div>
-      <article className="analytics-list surface"><div className="analytics-card-head"><div><h2>Země registrace</h2><p>{integerFormat.format(summary.paidOrders)} zaplacených objednávek podle registrační země vozidla</p></div></div>{(data.ordersByRegistrationCountry ?? []).map(country => <div className="device-row country-analytics" key={country.code}><span>{country.code !== "XX" && <Flag code={country.code} />}{countryName(country.code)}</span><strong>{integerFormat.format(country.orders)}</strong></div>)}</article>
+      <article className="registration-countries surface">
+        <div className="analytics-card-head">
+          <div>
+            <h2>Země registrace</h2>
+            <p>{integerFormat.format(registrationOrders)} zaplacených celkem · bez testovacích SPZ</p>
+          </div>
+        </div>
+        {registrationCountries.length ? (
+          <div className="registration-country-grid">
+            {registrationCountries.map(country => {
+              const share = registrationOrders ? Math.round(country.orders / registrationOrders * 1000) / 10 : 0;
+              return (
+                <div className="registration-country-row" key={country.code}>
+                  <span>{country.code !== "XX" && <Flag code={country.code} />}{countryName(country.code)}</span>
+                  <i><b style={{ width: `${Math.max(6, country.orders / maxRegistrationOrders * 100)}%` }} /></i>
+                  <strong>{integerFormat.format(country.orders)}</strong>
+                  <small>{share.toLocaleString("cs-CZ")} %</small>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="registration-countries-empty">Žádné zaplacené objednávky v období.</div>
+        )}
+      </article>
     </section>}
     {tab === "finance" && <section className="analytics-tab-content finance-analytics">
       <div className="analytics-stat-grid finance-stats">
@@ -1585,7 +1630,7 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
               <span className="country-flag"><Flag code={item.country} /></span>
               <div><strong>{item.product} · {item.displayCode ?? item.country}</strong><span>{dateLabel}</span></div>
               <div className={`item-note-slot${itemNote ? " has-note" : ""}`}>{itemNote || ""}</div>
-              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.duration ?? "Čeká"}</span></div>
+              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.duration ?? "Čeká"}</span></div>
               <span className={`status-tag ${item.status}`}>{statusLabels[item.status]}</span>
               {expanded === itemKey ? <ChevronDown /> : <ChevronRight />}
             </button>
@@ -1689,9 +1734,41 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
 
 function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: () => void; openOrder: (order: Order) => void }) {
   const [query, setQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(40);
   const normalized = query.toUpperCase().replace(/[\s-]/g, "");
-  const filtered = useMemo(() => orderData.filter(o => !query || `${o.id}${o.plate.replace(/[\s-]/g, "")}${o.email}`.toUpperCase().includes(normalized)), [normalized, query, orderData]);
-  return <main className="page-shell"><BackButton onClick={back} /><div className="page-title"><div><span className="eyebrow">Supabase</span><h1>Všechny objednávky</h1></div><label className="search wide"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Hledat SPZ, ID nebo e-mail" /></label></div><div className="orders-gallery">{filtered.map(o => <OrderCard key={o.id} order={o} onOpen={() => openOrder(o)} />)}</div><button className="load-more">Načíst další</button></main>;
+  const filtered = useMemo(() => {
+    const matched = orderData.filter(order => !query || `${order.id}${order.number}${order.plate.replace(/[\s-]/g, "")}${order.email}`.toUpperCase().includes(normalized));
+    return [...matched].sort((a, b) => {
+      const byRank = previewOrderRank(a.status) - previewOrderRank(b.status);
+      if (byRank !== 0) return byRank;
+      return Date.parse(b.paidAtIso ?? b.createdAtIso ?? "") - Date.parse(a.paidAtIso ?? a.createdAtIso ?? "");
+    });
+  }, [normalized, orderData, query]);
+  const visible = filtered.slice(0, visibleCount);
+  const canLoadMore = visible.length < filtered.length;
+  return (
+    <main className="page-shell">
+      <BackButton onClick={back} />
+      <div className="page-title">
+        <div>
+          <span className="eyebrow">Supabase</span>
+          <h1>Všechny objednávky</h1>
+          <p className="page-subtitle">{filtered.length ? `${filtered.length} objednávek` : "Žádné objednávky"}</p>
+        </div>
+        <label className="search wide"><Search size={18} /><input value={query} onChange={event => { setQuery(event.target.value); setVisibleCount(40); }} placeholder="Hledat SPZ, ID nebo e-mail" /></label>
+      </div>
+      {visible.length ? (
+        <div className="orders-gallery">{visible.map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />)}</div>
+      ) : (
+        <div className="empty surface">Žádná objednávka neodpovídá hledání.</div>
+      )}
+      {canLoadMore && (
+        <button type="button" className="load-more" onClick={() => setVisibleCount(count => count + 40)}>
+          Načíst další ({filtered.length - visible.length} zbývá)
+        </button>
+      )}
+    </main>
+  );
 }
 
 type TreeKind = "screenshots" | "documents";
@@ -1876,7 +1953,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
   const [routeOrderId, setRouteOrderId] = useState(initialRoute.orderId ?? "");
   const [routeArticleId, setRouteArticleId] = useState(initialRoute.articleId ?? "");
   const [routeArticleLocale, setRouteArticleLocale] = useState(initialRoute.articleLocale ?? "cs");
-  const [orderData, setOrderData] = useState<Order[]>([]);
+  const [orderData, setOrderData] = useState<Order[]>(demoOrders);
   const [selectedOrder, setSelectedOrder] = useState<Order>(demoOrders[0]);
   useEffect(() => {
     window.history.replaceState({ egp: true, entry: true }, "", window.location.href);
@@ -1892,7 +1969,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
   useEffect(() => {
-    const loadOrders = () => fetch("/api/orders")
+    const loadOrders = () => fetch("/api/orders?limit=200")
       .then(response => response.ok ? response.json() : Promise.reject())
       .then((payload: { mode: string; data?: Order[] }) => {
         if (payload.mode === "live" && payload.data?.length) {
@@ -1939,7 +2016,11 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
   const markItemFulfilled = (itemId: string, fulfilledAt: string) => {
     const update = (order: Order): Order => {
       const items = order.items.map(item => item.id === itemId ? { ...item, status: "fulfilled" as const, fulfilledAt, failedAt: undefined, lastError: undefined } : item);
-      const status: OrderStatus = items.length && items.every(item => item.status === "fulfilled") ? "fulfilled" : items.some(item => item.status === "processing") ? "processing" : items.some(item => item.status === "failed") ? "failed" : order.status;
+      const status: OrderStatus = items.length && items.every(item => item.status === "fulfilled") ? "fulfilled"
+        : items.some(item => item.status === "processing") ? "processing"
+        : items.some(item => item.status === "plus") ? "plus"
+        : items.some(item => item.status === "failed") ? "failed"
+        : order.status;
       return { ...order, items, status };
     };
     setSelectedOrder(current => update(current));
