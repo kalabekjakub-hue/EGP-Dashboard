@@ -52,6 +52,8 @@ export type Order = {
   fulfilledAtIso?: string;
   invoiceAvailable?: boolean;
   lastError?: string;
+  /** Worker precheck: true = hold until operator ACK; false = OK/acked; null = unchecked. */
+  plateCountryConflict?: boolean | null;
 };
 
 export const orders: Order[] = [

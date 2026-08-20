@@ -109,7 +109,7 @@ function dashboardWritePolicy() {
           return;
         }
         if (
-          (method === "POST" && (route === "/orders/fulfill-item" || route === "/orders/item-notes"))
+          (method === "POST" && (route === "/orders/fulfill-item" || route === "/orders/item-notes" || route === "/orders/ack-plate-country-conflict"))
           || (method === "DELETE" && route === "/orders/item-notes")
           || route.startsWith("/editorial/")
         ) {
@@ -119,7 +119,7 @@ function dashboardWritePolicy() {
         res.statusCode = 405;
         res.setHeader("Allow", "GET, HEAD, OPTIONS");
         res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(JSON.stringify({ error: "Dashboard je read-only; povoleno je pouze ruční označení itemu jako fulfilled a poznámky k položkám." }));
+        res.end(JSON.stringify({ error: "Dashboard je read-only; povoleno je pouze ruční označení itemu jako fulfilled, poznámky k položkám a ACK konfliktu SPZ/země." }));
       });
     },
   };
@@ -238,6 +238,7 @@ type RawOrder = {
   paid_at?: string; fulfilled_at?: string; flex_enabled: boolean; order_number: string; fulfillment_status?: string;
   vehicle_type?: string; fuel_type?: string; vehicle_vin?: string;
   invoice_pdf_path?: string; last_error?: string;
+  plate_country_conflict?: boolean | null;
 };
 type RawItem = {
   id: string; order_id: string; country_code: string; validity?: string; start_date?: string;
@@ -319,7 +320,7 @@ function supabaseReadApi() {
           const { url, key } = loadWorkerEnv();
           if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
           const headers = { apikey: key, Authorization: `Bearer ${key}` };
-          const orderSelect = "id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,invoice_pdf_path,last_error,vehicle_type,fuel_type,vehicle_vin";
+          const orderSelect = "id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,invoice_pdf_path,last_error,vehicle_type,fuel_type,vehicle_vin,plate_country_conflict";
           const requestUrl = new URL(req.url ?? "/", "http://localhost");
           const requestedLimit = Number(requestUrl.searchParams.get("limit") ?? 200);
           const orderLimit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 500) : 200;
@@ -433,6 +434,7 @@ function supabaseReadApi() {
               fulfilledAtIso: order.fulfilled_at,
               invoiceAvailable: Boolean(order.invoice_pdf_path),
               lastError: order.last_error,
+              plateCountryConflict: order.plate_country_conflict ?? null,
             };
           });
           res.statusCode = 200;
@@ -623,6 +625,47 @@ function manualFulfillmentApi() {
         } catch (error) {
           res.statusCode = 503;
           res.end(JSON.stringify({ entries: [], error: error instanceof Error ? error.message : "Audit není dostupný" }));
+        }
+      });
+      server.middlewares.use("/api/orders/ack-plate-country-conflict", async (req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ ok: false, error: "Method not allowed" }));
+          return;
+        }
+        try {
+          const sid = cookieValue(req.headers.cookie, "egp_admin_session");
+          const session = sid ? authSessions.get(sid) : undefined;
+          if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) throw new Error("Přihlášení vypršelo");
+          const body = await readJsonBody<{ orderId?: string }>(req, 4 * 1024);
+          if (!body.orderId) throw new Error("Chybí orderId");
+          const { url, key } = loadWorkerEnv();
+          if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
+          const upstream = await fetch(`${url}/rest/v1/rpc/ack_plate_country_conflict`, {
+            method: "POST",
+            headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              p_order_id: body.orderId,
+              p_actor_email: session.email,
+            }),
+          });
+          if (!upstream.ok) {
+            const detail = await upstream.text().catch(() => "");
+            throw new Error(detail || `Supabase ack ${upstream.status}`);
+          }
+          const result = await upstream.json() as { ok?: boolean; already_acked?: boolean; acked_at?: string; previous_value?: boolean | null };
+          res.statusCode = 200;
+          res.end(JSON.stringify({
+            ok: true,
+            alreadyAcked: Boolean(result.already_acked),
+            ackedAt: result.acked_at ?? null,
+            previousValue: result.previous_value ?? null,
+          }));
+        } catch (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "ACK konfliktu SPZ selhal" }));
         }
       });
     },

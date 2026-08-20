@@ -21,6 +21,7 @@ import {
   Settings,
   ShoppingCart,
   Trash2,
+  TriangleAlert,
   Users,
   X,
 } from "lucide-react";
@@ -759,9 +760,13 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
   </>;
 }
 
+function normalizePlateKey(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
   return (
-    <button className={`order-card ${order.status}`} onClick={onOpen}>
+    <button className={`order-card ${order.status}${order.plateCountryConflict === true ? " plate-conflict" : ""}`} onClick={onOpen}>
       <div className="order-meta"><span>{shortId(order.id)}</span><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span></div>
       <div className="order-primary">
         <div className="plate"><Flag code={order.registrationCode} /><strong>{order.plate}</strong></div>
@@ -770,6 +775,7 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
           <small className="profit">({profitMoney(order)})</small>
         </div>
       </div>
+      {order.plateCountryConflict === true && <div className="plate-conflict-chip"><TriangleAlert size={12} />Konflikt SPZ/země</div>}
       <div className="item-preview">
         {order.items.map((item) => <div key={item.id ?? `${item.source}-${item.country}-${item.product}`}><Flag code={item.country} /><b>{item.product}</b><span>{item.displayCode ?? item.country}</span></div>)}
       </div>
@@ -878,6 +884,18 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
   const problematic = [...failedByCountry.entries()].sort((a, b) => b[1] - a[1])[0];
   const incidents: DashboardIncident[] = [];
   for (const order of orderData) {
+    if (order.plateCountryConflict === true) {
+      const conflictDay = pragueDay(order.paidAtIso ?? order.createdAtIso);
+      if (conflictDay === today) {
+        incidents.push({
+          id: `plate-conflict:${order.id}`,
+          tone: "warning",
+          title: `${order.plate} · konflikt SPZ/země`,
+          detail: `Registrace ${order.registrationCountry} se neshoduje s dřívější objednávkou stejné SPZ`,
+          orderId: order.id,
+        });
+      }
+    }
     for (const item of order.items) {
       const prefix = `${item.country} · ${order.plate}`;
       if (item.status === "failed" && pragueDay(item.failedAt) === today) incidents.push({ id: `failed:${order.id}:${item.country}`, tone: "error", title: `${prefix} selhalo`, detail: item.lastError || "Položka skončila chybou", orderId: order.id });
@@ -1391,27 +1409,11 @@ const dismissedAttentionStorageKey = "egp-dismissed-attention-incidents";
 function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; navigate: (view: View) => void; openOrder: (order: Order) => void }) {
   const workers = useWorkerStatusSnapshot();
   const [attentionOpen, setAttentionOpen] = useState(false);
-  const [editorialIncidents, setEditorialIncidents] = useState<DashboardIncident[]>([]);
   const [dismissedIncidentIds, setDismissedIncidentIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(window.sessionStorage.getItem(dismissedAttentionStorageKey) ?? "[]") as string[]); }
     catch { return new Set(); }
   });
-  useEffect(() => {
-    let active = true;
-    const load = () => void fetch("/api/editorial/topics", { headers: { Accept: "application/json" } }).then(response => response.ok ? response.json() as Promise<{ topics?: Array<{ id: string; topic: string; status: string; last_error?: string | null }> }> : Promise.reject()).then(payload => {
-      if (!active) return;
-      const topics = payload.topics ?? [];
-      const review = topics.filter(topic => topic.status === "review");
-      const failed = topics.filter(topic => topic.status === "failed");
-      const incidents: DashboardIncident[] = [];
-      if (review.length) incidents.push({ id: `editorial:review:${review.map(topic => topic.id).join(",")}`, tone: "warning", title: `${review.length} článků čeká na kontrolu`, detail: "Otevři redakci a zkontroluj české koncepty", target: "editorial" });
-      failed.forEach(topic => incidents.push({ id: `editorial:failed:${topic.id}`, tone: "error", title: "Generování článku selhalo", detail: topic.last_error || topic.topic, target: "editorial" }));
-      setEditorialIncidents(incidents);
-    }).catch(() => undefined);
-    load(); const timer = window.setInterval(load, 30_000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, []);
-  const fullOverview = useMemo(() => { const base = buildDashboardOverview(orderData, workers); return { ...base, incidents: [...editorialIncidents, ...base.incidents] }; }, [editorialIncidents, orderData, workers]);
+  const fullOverview = useMemo(() => buildDashboardOverview(orderData, workers), [orderData, workers]);
   const overview = useMemo(() => ({ ...fullOverview, incidents: fullOverview.incidents.filter(incident => !dismissedIncidentIds.has(incident.id)) }), [dismissedIncidentIds, fullOverview]);
   useEffect(() => {
     const clear = () => {
@@ -1454,7 +1456,15 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
 
 function BackButton({ onClick }: { onClick: () => void }) { return <button className="back-button" onClick={onClick}><ArrowLeft size={18} /> Zpět</button>; }
 
-function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order; back: () => void; navigate: (view: View) => void; onItemFulfilled: (itemId: string, fulfilledAt: string) => void }) {
+function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled, onPlateConflictAck }: {
+  order: Order;
+  orders: Order[];
+  back: () => void;
+  navigate: (view: View) => void;
+  openOrder: (order: Order) => void;
+  onItemFulfilled: (itemId: string, fulfilledAt: string) => void;
+  onPlateConflictAck: () => void;
+}) {
   const [expanded, setExpanded] = useState("");
   const [orderLogs, setOrderLogs] = useState<WorkerLogEntry[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -1468,6 +1478,17 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
   const [noteDraft, setNoteDraft] = useState("");
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [noteState, setNoteState] = useState<"idle" | "saving" | "error">("idle");
+  const [ackOpen, setAckOpen] = useState(false);
+  const [ackState, setAckState] = useState<"idle" | "saving" | "error">("idle");
+
+  const peerOrders = useMemo(() => {
+    const plate = normalizePlateKey(order.plate);
+    if (!plate) return [] as Order[];
+    return orders
+      .filter(candidate => candidate.id !== order.id && normalizePlateKey(candidate.plate) === plate)
+      .sort((a, b) => Date.parse(b.createdAtIso ?? "") - Date.parse(a.createdAtIso ?? ""))
+      .slice(0, 8);
+  }, [order.id, order.plate, orders]);
 
   const toggleFulfillItem = (itemId: string) => {
     setFulfillState("idle");
@@ -1502,6 +1523,24 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
       setNotesVersion(version => version + 1);
     } catch {
       setFulfillState("error");
+    }
+  };
+
+  const confirmPlateConflictAck = async () => {
+    setAckState("saving");
+    try {
+      const response = await fetch("/api/orders/ack-plate-country-conflict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const payload = await response.json() as { ok?: boolean };
+      if (!response.ok || !payload.ok) throw new Error();
+      onPlateConflictAck();
+      setAckOpen(false);
+      setAckState("idle");
+    } catch {
+      setAckState("error");
     }
   };
 
@@ -1618,6 +1657,31 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
         <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
       </section>
+      {order.plateCountryConflict === true && (
+        <section className="plate-conflict-banner surface">
+          <span className="plate-conflict-banner-icon"><TriangleAlert size={20} /></span>
+          <div>
+            <strong>Konflikt SPZ a země registrace</strong>
+            <p>Stejná SPZ s jinou zemí registrace než u dřívější objednávky. Po potvrzení worker pokračuje v nákupu. Ověř SPZ/zemi před ACK; případně oprav data dříve.</p>
+            {peerOrders.length > 0 && (
+              <ul className="plate-conflict-peers">
+                {peerOrders.map(peer => (
+                  <li key={peer.id}>
+                    <button type="button" onClick={() => openOrder(peer)}>
+                      <Flag code={peer.registrationCode} />
+                      <span><b>{peer.plate}</b> · {peer.registrationCountry}</span>
+                      <small>{shortId(peer.id)}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <button type="button" className="plate-conflict-ack" onClick={() => { setAckState("idle"); setAckOpen(true); }}>
+            Potvrdit SPZ/zemi a pokračovat
+          </button>
+        </section>
+      )}
       <section className="items-section">
         <div className="section-heading"><div><span className="eyebrow">Obsah objednávky</span><h2>Známky, mosty a placené úseky</h2></div><span className="count">{order.items.length}</span></div>
         {order.items.map(item => {
@@ -1704,6 +1768,23 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
           </section>
         </div>
       )}
+      {ackOpen && (
+        <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => ackState !== "saving" && setAckOpen(false)}>
+          <section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="plate-ack-title" onMouseDown={event => event.stopPropagation()}>
+            <button className="manual-fulfill-close" onClick={() => setAckOpen(false)} aria-label="Zavřít" disabled={ackState === "saving"}><X size={18} /></button>
+            <span className="manual-fulfill-icon warn"><TriangleAlert size={22} /></span>
+            <h2 id="plate-ack-title">Potvrdit SPZ/zemi a pokračovat</h2>
+            <p>Worker znovu vezme pending položky této objednávky. Ověř, že SPZ <strong>{order.plate}</strong> a země <strong>{order.registrationCountry}</strong> jsou v pořádku.</p>
+            {ackState === "error" && <div className="manual-fulfill-error">ACK se nepodařil. Zkus to prosím znovu.</div>}
+            <div className="manual-fulfill-actions">
+              <button onClick={() => setAckOpen(false)} disabled={ackState === "saving"}>Zrušit</button>
+              <button className="confirm" onClick={() => void confirmPlateConflictAck()} disabled={ackState === "saving"}>
+                {ackState === "saving" ? "Uvolňuji…" : "Potvrdit a pokračovat"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {noteTarget && (
         <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => noteState !== "saving" && setNoteItemId("")}>
           <section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="item-note-title" onMouseDown={event => event.stopPropagation()}>
@@ -1734,16 +1815,24 @@ function OrderDetail({ order, back, navigate, onItemFulfilled }: { order: Order;
 
 function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: () => void; openOrder: (order: Order) => void }) {
   const [query, setQuery] = useState("");
+  const [onlyConflicts, setOnlyConflicts] = useState(false);
   const [visibleCount, setVisibleCount] = useState(40);
   const normalized = query.toUpperCase().replace(/[\s-]/g, "");
+  const conflictCount = useMemo(() => orderData.filter(order => order.plateCountryConflict === true).length, [orderData]);
   const filtered = useMemo(() => {
-    const matched = orderData.filter(order => !query || `${order.id}${order.number}${order.plate.replace(/[\s-]/g, "")}${order.email}`.toUpperCase().includes(normalized));
+    const matched = orderData.filter(order => {
+      if (onlyConflicts && order.plateCountryConflict !== true) return false;
+      if (!query) return true;
+      return `${order.id}${order.number}${order.plate.replace(/[\s-]/g, "")}${order.email}`.toUpperCase().includes(normalized);
+    });
     return [...matched].sort((a, b) => {
+      const conflictRank = Number(b.plateCountryConflict === true) - Number(a.plateCountryConflict === true);
+      if (conflictRank !== 0 && !onlyConflicts) return conflictRank;
       const byRank = previewOrderRank(a.status) - previewOrderRank(b.status);
       if (byRank !== 0) return byRank;
       return Date.parse(b.paidAtIso ?? b.createdAtIso ?? "") - Date.parse(a.paidAtIso ?? a.createdAtIso ?? "");
     });
-  }, [normalized, orderData, query]);
+  }, [normalized, onlyConflicts, orderData, query]);
   const visible = filtered.slice(0, visibleCount);
   const canLoadMore = visible.length < filtered.length;
   return (
@@ -1755,12 +1844,21 @@ function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: (
           <h1>Všechny objednávky</h1>
           <p className="page-subtitle">{filtered.length ? `${filtered.length} objednávek` : "Žádné objednávky"}</p>
         </div>
-        <label className="search wide"><Search size={18} /><input value={query} onChange={event => { setQuery(event.target.value); setVisibleCount(40); }} placeholder="Hledat SPZ, ID nebo e-mail" /></label>
+        <div className="orders-toolbar">
+          <button
+            type="button"
+            className={`orders-filter-chip${onlyConflicts ? " active" : ""}`}
+            onClick={() => { setOnlyConflicts(current => !current); setVisibleCount(40); }}
+          >
+            <TriangleAlert size={14} /> Konflikty SPZ{conflictCount ? ` · ${conflictCount}` : ""}
+          </button>
+          <label className="search wide"><Search size={18} /><input value={query} onChange={event => { setQuery(event.target.value); setVisibleCount(40); }} placeholder="Hledat SPZ, ID nebo e-mail" /></label>
+        </div>
       </div>
       {visible.length ? (
         <div className="orders-gallery">{visible.map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />)}</div>
       ) : (
-        <div className="empty surface">Žádná objednávka neodpovídá hledání.</div>
+        <div className="empty surface">{onlyConflicts ? "Žádný konflikt SPZ/země v načtených objednávkách." : "Žádná objednávka neodpovídá hledání."}</div>
       )}
       {canLoadMore && (
         <button type="button" className="load-more" onClick={() => setVisibleCount(count => count + 40)}>
@@ -2026,7 +2124,12 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     setSelectedOrder(current => update(current));
     setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} back={goBack} navigate={navigate} onItemFulfilled={markItemFulfilled} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
+  const markPlateConflictAcked = () => {
+    const update = (order: Order): Order => ({ ...order, plateCountryConflict: false });
+    setSelectedOrder(current => current.id === activeOrder.id ? update(current) : current);
+    setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
+  };
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} orders={orderData} back={goBack} navigate={navigate} openOrder={openOrder} onItemFulfilled={markItemFulfilled} onPlateConflictAck={markPlateConflictAcked} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
 }
 
 export default function App() {

@@ -1,16 +1,17 @@
 # EGP dashboard – integrační kontrakt
 
-> **ZÁVAZNÉ PRAVIDLO:** Produkční data jsou READ-ONLY. Jediné povolené zápisy jsou (1) ruční změna existující položky objednávky na `FULFILLED` včetně auditu a volitelné poznámky, (2) operátorské poznámky k položce v `dashboard_order_item_notes` (uložení/nahrazení a smazání) a (3) operace Redakce/blogu v redakčních tabulkách a úložištích. Veškerá deduplikace nebo skrývání objednávek musí probíhat pouze při čtení nebo v UI. Objednávky ani jejich položky se kvůli dashboardu nesmí vytvářet, upravovat ani mazat mimo výslovně povolené FULFILLED.
+> **ZÁVAZNÉ PRAVIDLO:** Produkční data jsou READ-ONLY. Jediné povolené zápisy jsou (1) ruční změna existující položky objednávky na `FULFILLED` včetně auditu a volitelné poznámky, (2) operátorské poznámky k položce v `dashboard_order_item_notes` (uložení/nahrazení a smazání), (3) operace Redakce/blogu v redakčních tabulkách a úložištích a (4) ruční ACK `plate_country_conflict` na existující objednávce včetně mirroru na položky a auditního záznamu. Veškerá deduplikace nebo skrývání objednávek musí probíhat pouze při čtení nebo v UI. Objednávky ani jejich položky se kvůli dashboardu nesmí vytvářet, upravovat ani mazat mimo výslovně povolené FULFILLED a plate-country ACK.
 
 ## Bezpečnostní hranice
 
-Dashboard je read-only administrativní pohled s výslovně povolenými write operacemi pro fulfillment, poznámky k položkám a oddělenou Redakci/blog. Obchodní data smí měnit pouze tato operace:
+Dashboard je read-only administrativní pohled s výslovně povolenými write operacemi pro fulfillment, poznámky k položkám, plate-country ACK a oddělenou Redakci/blog. Obchodní data smí měnit pouze tyto operace:
 
 ```text
 POST /api/orders/fulfill-item
 POST /api/orders/item-notes
 DELETE /api/orders/item-notes
 GET  /api/orders/item-notes?orderId=...
+POST /api/orders/ack-plate-country-conflict
 ```
 
 Operace `POST /api/orders/fulfill-item` smí pouze označit existující `order_items` nebo `order_bridge_toll_items` jako `fulfilled`, doplnit `fulfilled_at` a volitelně uložit operátorskou poznámku do `manual_fulfillment_audit.note`. Ostatní ne-GET požadavky nad obchodními daty server odmítne stavem `405`.
@@ -18,6 +19,8 @@ Operace `POST /api/orders/fulfill-item` smí pouze označit existující `order_
 Změna položky a zápis do `manual_fulfillment_audit` musí proběhnout atomicky v jediné databázové transakci prostřednictvím `manual_fulfill_order_item`. Funkce smí měnit výhradně `status` a `fulfilled_at` na položce a zapsat auditní řádek včetně volitelného `note`; při selhání auditu se musí vrátit zpět i změna položky. Spuštění RPC je povoleno pouze serverové roli dashboardu a až po ověření administrátorské session.
 
 Operace `POST /api/orders/item-notes` smí pro existující položku nahradit aktivní poznámku v `dashboard_order_item_notes` (smaze předchozí řádky stejné položky a vloží nový). Nesmí měnit `order_items`, `order_bridge_toll_items` ani jiná obchodní pole. Text poznámky je omezen na 2000 znaků. Operace `DELETE /api/orders/item-notes` smí smazat pouze řádky `dashboard_order_item_notes` pro dané `orderId` + `itemId`. Čtení poznámek probíhá přes `GET /api/orders/item-notes`.
+
+Operace `POST /api/orders/ack-plate-country-conflict` smí pouze uvolnit hold `plate_country_conflict` na existující objednávce. Zápis musí proběhnout atomicky přes RPC `ack_plate_country_conflict`: nastavit `orders.plate_country_conflict = false`, zrcadlit stejnou hodnotu do `order_items` a `order_bridge_toll_items` daného `order_id` a zapsat auditní řádek do `dashboard_plate_country_conflict_acks` (včetně `actor_email` a předchozí hodnoty). Nesmí měnit status, SPZ, zemi registrace, platby ani jiná obchodní pole a nesmí nastavit hodnotu na `NULL`. Spuštění RPC je povoleno pouze serverové roli dashboardu a až po ověření administrátorské session.
 
 Přístup k dashboardu je omezen explicitním serverovým allowlistem `EGP_ADMIN_EMAILS`. Samotná existence účtu v Supabase Auth neopravňuje k přístupu do administrace.
 
@@ -57,7 +60,7 @@ Všechny e-maily v dashboard allowlistu mají totožná dashboard oprávnění. 
 
 ## Pravidla pro další integrace
 
-- Supabase, PostHog, logy, screenshoty, doklady a Retell AI jsou z pohledu dashboardu pouze zdroje pro čtení; výjimkou jsou výslovně povolené fulfillment, poznámky k položkám a redakční operace popsané výše.
+- Supabase, PostHog, logy, screenshoty, doklady a Retell AI jsou z pohledu dashboardu pouze zdroje pro čtení; výjimkou jsou výslovně povolené fulfillment, poznámky k položkám, plate-country ACK a redakční operace popsané výše.
 - Tajné klíče patří pouze do serverového prostředí na VPS; nikdy do `VITE_*` proměnných.
 - Příjem e-mailu, Retell webhooků a dalších externích událostí musí zajišťovat samostatný ingest/worker. Dashboard tato data pouze čte ze Supabase.
 - `orders.invoice_pdf_path` označuje fakturu vystavenou EuroGoPass zákazníkovi. Nesmí se prezentovat jako nákupní doklad z oficiálního portálu.
