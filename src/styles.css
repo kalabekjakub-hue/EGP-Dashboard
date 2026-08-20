@@ -698,20 +698,23 @@
 .orders-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:flex-end}
 .orders-filter-chip{height:42px;padding:0 14px;border:1px solid #ead9b5;border-radius:14px;background:#fffefb;color:#806019;display:inline-flex;align-items:center;gap:7px;font:700 12px "DM Sans",Arial,sans-serif;cursor:pointer}
 .orders-filter-chip.active{background:#fff0bd;border-color:#dfc27a;box-shadow:0 0 0 3px #dfc27a22}
-.plate-conflict-banner{margin:16px 0 0;padding:18px 20px;border:1px solid #ead9b5;background:linear-gradient(145deg,#fffefb,#fff7e7);display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:14px 16px;align-items:start}
+/* Clear absolute .hero-actions (top: calc(100% + 15px)) that sit below the detail hero */
+.plate-conflict-banner{margin:72px 0 0;padding:18px 20px;border:1px solid #ead9b5;background:linear-gradient(145deg,#fffefb,#fff7e7);display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px 16px;align-items:start}
 .plate-conflict-banner-icon{width:44px;height:44px;border-radius:14px;background:#fff0bd;color:#806019;display:grid;place-items:center}
 .plate-conflict-banner strong{display:block;font-size:15px;color:#5f4812}
-.plate-conflict-banner p{margin:6px 0 0;color:#6f6548;font-size:13px;line-height:1.45}
+.plate-conflict-banner p{margin:6px 0 0;color:#6f6548;font-size:13px;line-height:1.45;max-width:62ch}
 .plate-conflict-peers{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
 .plate-conflict-peers button{border:1px solid #ead9b5;border-radius:12px;background:#fff;padding:7px 10px;display:inline-flex;align-items:center;gap:8px;cursor:pointer;font:inherit;color:#3d3828}
 .plate-conflict-peers button:hover{border-color:#dfc27a;background:#fffefb}
 .plate-conflict-peers small{color:#8a7d5a}
-.plate-conflict-ack{height:42px;padding:0 16px;border:0;border-radius:999px;background:#111;color:#fff;font:700 12px "DM Sans",Arial,sans-serif;cursor:pointer;white-space:nowrap}
+.plate-conflict-ack{grid-column:2;justify-self:start;margin-top:4px;height:42px;padding:0 16px;border:0;border-radius:999px;background:#111;color:#fff;font:700 12px "DM Sans",Arial,sans-serif;cursor:pointer;white-space:nowrap}
 .plate-conflict-ack:hover{background:#263128}
+.plate-conflict-banner + .items-section{margin-top:22px}
 .manual-fulfill-icon.warn{background:#fff0bd;color:#806019}
+.hero-actions{flex-wrap:wrap;max-width:min(720px,calc(100% - 38px));justify-content:flex-end}
 @media(max-width:760px){
   .orders-toolbar{width:100%;justify-content:stretch}
   .orders-toolbar .search.wide{flex:1;min-width:0}
-  .plate-conflict-banner{grid-template-columns:38px minmax(0,1fr);padding:15px}
-  .plate-conflict-ack{grid-column:1/-1;width:100%}
+  .plate-conflict-banner{margin-top:18px;grid-template-columns:38px minmax(0,1fr);padding:15px}
+  .plate-conflict-ack{grid-column:1/-1;width:100%;justify-self:stretch}
 }
