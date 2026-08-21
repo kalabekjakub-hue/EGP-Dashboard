@@ -16,7 +16,7 @@ AI-asistovaná tvorba praktických SEO článků o cestování, dálničních zn
 
 - Praktický text (řádově jedna A4)
 - `target_characters` **500–12 000**, při generování CZ cíl **±10 %**; po třech opravách se text uloží i mimo rozsah
-- Organické představení EuroGoPass na konci
+- Organické představení EuroGoPass u konkrétních poplatků i v závěru
 - SEO + GEO dohledatelnost
 
 ## Workflow
@@ -82,8 +82,9 @@ Hlavní: `editor-prompt.md`. Doladění: styl, struktura, brand, rules. Max 20 0
 - `/:locale#home-hero`
 - `/:locale/coverage`
 - `/:locale/coverage/:country`
+- `/:locale/plus`
 
-Locale musí sedět s jazykovou verzí; kotva popisná. Holé URL a vymyšlené cesty zakázány.
+Locale musí sedět s jazykovou verzí; kotva popisná. Holé URL a vymyšlené cesty zakázány. V zákaznickém textu žádné odkazy mimo `eurogopass.com`; oficiální URL jen v `claims.source_urls`.
 
 ### Style profiles
 
@@ -97,7 +98,7 @@ Locale musí sedět s jazykovou verzí; kotva popisná. Holé URL a vymyšlené 
 - Audit v `blog_seo_audits`: poradní skóre 0–100 — **neblokuje publikaci**
 - `seo-refresh`: nový výběr záměrů, draft, run `rewrite`, audit; musí zachovat podstatu textu
 
-**Clustering:** cena / nákup / kontrola / délky platnosti stejného produktu v jedné zemi → standardně podsekce jednoho článku. Řazení kandidátů deterministické.
+**Clustering:** cena / nákup / kontrola / délky platnosti stejného produktu v jedné zemi → standardně podsekce jednoho článku. Řazení kandidátů deterministické. Po použití (návrh / článek / publikace) priorita výrazu rapidně klesne. Stejné primární slovo, silný překryv clusteru nebo skoro stejný titulek se nesmí navrhnout znovu.
 
 ## Automatizace (worker)
 

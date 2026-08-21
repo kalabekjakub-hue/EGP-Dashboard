@@ -10,7 +10,7 @@ type EditorialDraft = {
 type EditorialTranslation = EditorialDraft & { id?: string; locale: string; draft?: EditorialDraft | null; editorial_status?: string; last_published_at?: string };
 type EditorialAiUsage = { input_tokens: number; output_tokens: number; total_tokens: number; estimated_cost_usd: number; estimated_cost_czk: number };
 export type EditorialArticle = { id: string; slug: string; status: string; published_at?: string | null; published_by?: string | null; hero_image_url?: string | null; countries: string[]; tags: string[]; source_topic?: string; created_at: string; updated_at: string; ai_usage?: EditorialAiUsage; translations: EditorialTranslation[] };
-type EditorialKeyword = { id: string; query: string; last_imported_at?: string };
+type EditorialKeyword = { id: string; query: string; last_imported_at?: string; suggested_count?: number; generated_count?: number; published_count?: number; impressions?: number | null; opportunity_score?: number; priority_rank?: number };
 type WritingStyle = "balanced" | "factual" | "roadmate";
 type EditorialTopic = { id: string; topic: string; target_characters: number; status: string; source: string; style_profile?: WritingStyle; post_id?: string | null; last_error?: string | null; created_at: string; keywords?: EditorialKeyword[] };
 type EditorialSettings = { enabled: boolean; drafts_per_day: number; max_pending_reviews: number; generation_hour: number; autosave_enabled: boolean };
@@ -30,6 +30,16 @@ const writingStyles: Array<{ id: WritingStyle; name: string; description: string
 
 function currentValue(row: EditorialTranslation): EditorialDraft & { locale: string } {
   return { ...row, ...(row.draft ?? {}), locale: row.locale };
+}
+
+function keywordUsageLabel(keyword: EditorialKeyword) {
+  const published = Number(keyword.published_count ?? 0);
+  const generated = Number(keyword.generated_count ?? 0);
+  const suggested = Number(keyword.suggested_count ?? 0);
+  if (published) return published === 1 ? "publikováno" : `${published}× publikováno`;
+  if (generated) return generated === 1 ? "článek" : `${generated}× článek`;
+  if (suggested) return suggested === 1 ? "navrženo" : `${suggested}× navrženo`;
+  return "";
 }
 
 function versionLabel(value: EditorialDraft, locale: string) {
@@ -197,7 +207,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
           <section className="editorial-overview-panel surface">
             <header><h2>Tabule témat</h2><b>{topics.length}</b></header>
             <div className="editorial-topic-list">
-              {topics.map(topic => <article className={selectedTopic === topic.id ? "selected" : ""} key={topic.id} onClick={() => setSelectedTopic(current => current === topic.id ? "" : topic.id)}>
+              {topics.map(topic => <article className={selectedTopic === topic.id ? "selected" : ""} key={topic.id} title={topic.keywords?.length ? topic.keywords.map(keyword => keyword.query).join(" · ") : undefined} onClick={() => setSelectedTopic(current => current === topic.id ? "" : topic.id)}>
                 <div className="topic-title"><h3>{topic.topic}</h3><span className={`topic-source ${topic.source}`}>{topic.source === "ai" ? "AI" : "Člověk"}</span>{topic.status === "failed" && <span className="topic-source topic-failed" title={topic.last_error || "Generování selhalo"}>Chyba</span>}<span className="topic-characters">{topic.target_characters.toLocaleString("cs-CZ")} znaků</span></div>
                 {selectedTopic === topic.id ? <button className="delete-topic" aria-label="Smazat téma" title="Smazat téma" onClick={event => { event.stopPropagation(); void deleteTopic(topic); }}><X size={18} /></button> : <div className="topic-actions">{topic.status === "review" ? <button aria-label="Otevřít článek" title="Otevřít článek" onClick={event => { event.stopPropagation(); if (topic.post_id) openArticle(topic.post_id); }}><FileText size={18} /></button> : <button className={automation.enabled ? "automatic" : ""} aria-label="Vygenerovat pomocí AI" title="Vygenerovat pomocí AI" disabled={queueing.has(topic.id) || topic.status === "scheduled" || topic.status === "generating"} onClick={event => { event.stopPropagation(); openStyleDialog(topic); }}>{queueing.has(topic.id) || topic.status === "scheduled" || topic.status === "generating" ? <LoaderCircle className="spin" size={18} /> : <Sparkles size={18} />}</button>}{automation.enabled && topic.status !== "review" && <time>{nextGeneration}</time>}</div>}
               </article>)}
@@ -205,7 +215,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
             </div>
           </section>
           <details className="editorial-keyword-pool surface">
-            <summary><span><strong>Klíčová slova</strong></span><b>{keywords.length.toLocaleString("cs-CZ")}</b><ChevronDown size={17} /></summary>
+            <summary><span><strong>Klíčová slova</strong><small>Řazeno podle priority. Po použití výraz klesne.</small></span><b>{keywords.length.toLocaleString("cs-CZ")}</b><ChevronDown size={17} /></summary>
             {keywordSetupRequired ? <div className="editorial-keyword-empty error">Nejdřív aplikuj migraci pro SEO/GEO pool.</div> : <div className="editorial-keyword-body">
               <form className="editorial-keyword-import" onSubmit={event => { event.preventDefault(); void importKeywords(manualKeywords, "manual"); }}>
                 <div className="editorial-keyword-actions">
@@ -214,7 +224,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
                 </div>
                 <input className="editorial-keyword-input" type="text" value={manualKeywords} onChange={event => setManualKeywords(event.target.value.replace(/[\r\n]+/g, " "))} placeholder="Napiš klíčové slovo a stiskni Enter…" autoComplete="off" />
               </form>
-              {keywords.length ? <ul className="editorial-keyword-list">{keywords.slice(0, 500).map(keyword => <li key={keyword.id} title={keyword.query}>{keyword.query}</li>)}</ul> : <div className="editorial-keyword-empty">Pool je zatím prázdný. AI bude dál navrhovat témata z redakčních podkladů.</div>}
+              {keywords.length ? <ul className="editorial-keyword-list">{keywords.slice(0, 500).map(keyword => { const usage = keywordUsageLabel(keyword); return <li className={usage ? "used" : undefined} key={keyword.id} title={usage ? `${keyword.query} · ${usage}` : keyword.query}>{keyword.query}{usage ? <small>{usage}</small> : null}</li>; })}</ul> : <div className="editorial-keyword-empty">Pool je zatím prázdný. AI bude dál navrhovat témata z redakčních podkladů.</div>}
             </div>}
           </details>
         </div>
@@ -241,10 +251,24 @@ Jsi redaktor EuroGoPass. Připravuješ praktické články o cestování autem, 
 
 - Odpověz přímo na otázku čtenáře, potom vysvětli podmínky a výjimky.
 - Ověřuj proměnlivá fakta z aktuálních důvěryhodných zdrojů. Nic nevymýšlej.
-- Piš srozumitelně, konkrétně a bez výplně.
+- Piš srozumitelně, konkrétně a bez výplně. Drž se zadaného počtu znaků.
 - Připrav text tak, aby čtenář věděl, co se týká jeho trasy nebo vozidla a co má udělat dál.
 - Drž se zvoleného stylového profilu (\`balanced\`, \`factual\` nebo \`roadmate\`) jako komunikačního odstínu.
 - Detailní hlas, strukturu, terminologii, co zmiňovat i nezmiňovat a roli EuroGoPass ber z ostatních aktivních redakčních Markdown podkladů.
+
+## EuroGoPass v každém článku
+
+Článek nemá být encyklopedie země. Má čtenáře dovést k tomu, co si má připravit a kde to vyřídí.
+
+- Hned u tématu stručně řekni, co EuroGoPass je: služba, kde zadáte trasu, uvidíte potřebné známky, mýto i zvláštní poplatky a dostupné produkty koupíte najednou.
+- U každé relevantní země nebo úseku rozliš známku, most, tunel, úsekové mýto a Free-Flow. Hned u daného poplatku řekni, co s ním čtenář udělá v EuroGoPass.
+- Produkt kamerového mýta se jmenuje **Free-Flow**, ne EPASS24. Aplikaci nezmiňuj. Plus smíš zmínit u známek, ne jako stejnou službu u odloženého Free-Flow.
+- Coverage stránky můžou zaostávat. Nákup namiř do plánovače. Nevymýšlej chybějící stránku země a nevymýšlej ceny Free-Flow.
+- Do článku nedávej odkazy na oficiální weby (edalnice, eznamka, nemzetiutdij, EPASS24 a podobně). Čtenář kliká jen na eurogopass.com. Oficiální URL patří do claims.
+
+## Délka
+
+Hlavní text \`body_md\` musí padnout do zadaného počtu znaků včetně mezer, plus minus 10 %. Piš spíš ke středu až spodku rozsahu a maximum nepřekračuj. Výplň, historii a obecné úvody nepoužívej.
 
 ## Jak pracovat s podklady
 

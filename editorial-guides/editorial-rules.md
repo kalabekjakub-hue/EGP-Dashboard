@@ -17,7 +17,7 @@ Pro nabídku, cenu a podmínky EuroGoPass používej aktuální produktová data
 
 Blogy, diskuse, sociální sítě a automaticky vytvořené přehledy nejsou dostatečným zdrojem pro cenu, platnost, pokutu ani zákonnou povinnost.
 
-Použití oficiálního státního webu jako interního zdroje neznamená, že ho má článek nabízet čtenáři jako místo nákupu. V zákaznickém textu ho uváděj jen tehdy, když je odkaz nezbytný pro doložení důležitého tvrzení, provedení povinného úkonu, kontrolu nebo bezpečné dokončení cesty. Nezamlčuj relevantní skutečnost, ale nevytvářej doporučení či výzvu k nákupu mimo EuroGoPass.
+Použití oficiálního státního webu jako interního zdroje neznamená, že ho má článek ukazovat čtenáři. U známek, mostů a Free-Flow FR/NO/SE je další krok vždy plánovač EuroGoPass. Do `body_md` nevkládej odkaz, holou URL ani závorku s oficiální doménou. URL zdroje patří jen do claims.
 
 ## Co musí být aktuálně ověřeno
 
@@ -33,6 +33,8 @@ Před vložením do článku ověř zejména:
 - pravidla opravy údajů, storna a vrácení peněz;
 - výši pokuty nebo jiného postihu;
 - dostupnost konkrétního produktu přes EuroGoPass.
+
+Když článek popisuje zemi nebo trasu, nesmí skončit jen výčtem pravidel. U produktů, které EuroGoPass prodává (známky, mosty, Free-Flow FR/NO/SE, Øresund), musí být jasné, jak to čtenář vyřídí u nás. Kamerové mýto nazývej **Free-Flow**, ne EPASS24. Coverage stránka nesmí sama zakázat nákup, který už je v nabídce. Nevymýšlej ceny Free-Flow. Plus nepřenášej na odložené kamerové mýto. Aplikaci nezmiňuj.
 
 Ukládej přímou adresu konkrétního zdroje a datum kontroly, pokud to datový model dovoluje. Letopočet v názvu článku nepovažuj za důkaz aktuálnosti.
 
@@ -83,5 +85,5 @@ Před publikací musí být možné odpovědět ano na všechny relevantní otá
 - Má každý proměnlivý klíčový údaj aktuální přímý zdroj?
 - Neobsahuje text nepodložený slib nebo produktovou vlastnost?
 - Sedí čísla a podmínky ve všech jazykových verzích?
-- Je další krok pro čtenáře konkrétní a proveditelný?
+- Je další krok pro čtenáře konkrétní a proveditelný přes EuroGoPass, pokud to nabídka dovoluje?
 - Je článek označen k ruční kontrole, pokud zůstal nevyřešený konflikt nebo nejistota?

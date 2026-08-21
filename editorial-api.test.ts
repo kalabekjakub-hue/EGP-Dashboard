@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleLengthPrompt, articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
+import { articleLengthPrompt, articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, isDuplicateEditorialTopic, keywordClustersContract, keywordOpportunityScore, keywordPoolView, keywordRows, keywordSelectionChanged, keywordSetOverlap, keywordUsagePenalty, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, promoteUnusedPrimary, requestedArticleLength, sanitizeCustomerFacingLinks, seoContentHash, seoGeoContract, seoRefreshSafety, topicTitleSimilarity, trimArticleToLengthRange, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -48,6 +48,8 @@ test("loads the shared SEO/GEO contract for every AI stage", () => {
   assert.match(internalLinksContract, /Markdown/);
   assert.match(internalLinksContract, /plánovač/i);
   assert.match(internalLinksContract, /lokaliz/i);
+  assert.match(internalLinksContract, /claims\.source_urls/);
+  assert.match(internalLinksContract, /eurogopass\.com/);
   assert.match(writingStylesContract, /balanced/);
   assert.match(writingStylesContract, /factual/);
   assert.match(writingStylesContract, /roadmate/);
@@ -56,7 +58,7 @@ test("loads the shared SEO/GEO contract for every AI stage", () => {
   assert.equal(primaryEditorialGuideFilename, "editor-prompt.md");
   assert.match(keywordClustersContract, /Nejdříve cluster, potom téma/i);
   assert.match(keywordClustersContract, /jeden den, deset dní, měsíc, dva měsíce nebo rok/i);
-  assert.match(keywordClustersContract, /nemá pevné minimum ani maximum/i);
+  assert.match(keywordClustersContract, /Priorita a rozmanitost/i);
 });
 
 test("editorial guides put editor-prompt.md first as the main prompt", () => {
@@ -95,6 +97,35 @@ test("keyword opportunity values aggregate demand above one isolated good positi
   assert.ok(broad > narrow);
 });
 
+test("using a keyword drops its priority far below an unused twin", () => {
+  const now = new Date("2026-07-20T12:00:00.000Z").getTime();
+  const unused = { id: "a", query: "rakouská dálniční známka", normalized_query: "rakouská dálniční známka", source: "search_console" as const, impressions: 40, position: 28, clicks: 0, ctr: 0, suggested_count: 0, generated_count: 0, published_count: 0, last_imported_at: "2026-07-20T10:45:30.000Z" };
+  const used = { ...unused, id: "b", suggested_count: 1 };
+  assert.equal(keywordUsagePenalty(unused), 1);
+  assert.equal(keywordUsagePenalty(used), 12);
+  assert.ok(keywordOpportunityScore(unused, now) / keywordOpportunityScore(used, now) >= 10);
+  const ranked = keywordPoolView([used, unused], now);
+  assert.equal(ranked[0].id, "a");
+  assert.equal(ranked[0].priority_rank, 1);
+});
+
+test("duplicate topic check blocks the same primary keyword and near-identical titles", () => {
+  const existing = [{ topic: "Rakouská dálniční známka: ceny a platnost", keywordIds: ["at", "at-10", "at-year"], primaryKeywordId: "at" }];
+  assert.equal(isDuplicateEditorialTopic({ topic: "Rakouská dálniční známka na dovolenou", keywordIds: ["at-weekend"], primaryKeywordId: "at" }, existing), true);
+  assert.equal(isDuplicateEditorialTopic({ topic: "Rakouská dálniční známka: ceny a platnost", keywordIds: ["other"], primaryKeywordId: "other" }, existing), true);
+  assert.equal(keywordSetOverlap(["at", "at-10", "at-year", "at-month"], ["at", "at-10", "at-year"]), 0.75);
+  assert.ok(topicTitleSimilarity("Slovenská dálniční známka na 10 dní", "Maďarská dálniční známka na Balaton") < 0.68);
+  assert.equal(isDuplicateEditorialTopic({ topic: "Slovenská dálniční známka na 10 dní", keywordIds: ["sk", "sk-10"], primaryKeywordId: "sk" }, existing), false);
+});
+
+test("unused keyword in a mixed selection becomes the primary intent", () => {
+  const candidates = [
+    { id: "used", query: "rakouská známka", normalized_query: "rakouská známka", source: "manual" as const, suggested_count: 1 },
+    { id: "fresh", query: "slovenská známka", normalized_query: "slovenská známka", source: "manual" as const, suggested_count: 0 },
+  ];
+  assert.deepEqual(promoteUnusedPrimary(["used", "fresh"], candidates), ["fresh", "used"]);
+});
+
 test("article target of 4500 characters allows only a ten percent deviation", () => {
   assert.deepEqual(articleLengthRange(4500), { target: 4500, minimum: 4050, maximum: 4950 });
   assert.equal(articleLengthStatus("x".repeat(4050), 4500).valid, true);
@@ -107,9 +138,24 @@ test("article length prompt states the exact target and ten percent band", () =>
   const prompt = articleLengthPrompt(4500);
   assert.match(prompt, /4.?500/);
   assert.match(prompt, /10 %/);
-  assert.match(prompt, /± 30/);
   assert.match(prompt, /4.?050/);
   assert.match(prompt, /4.?950/);
+  assert.match(prompt, /nad maximem/i);
+});
+
+test("length trim drops filler without touching numbers or links", () => {
+  const intro = "Na švýcarských dálnicích potřebujete elektronickou známku před vjezdem. ".repeat(8);
+  const filler = "Obecný popis krajiny a volnočasových tipů bez praktického údaje. ".repeat(18);
+  const practical = "Roční známka stojí 40 CHF. [Naplánujte trasu přes EuroGoPass](https://eurogopass.com/cs#home-hero). ".repeat(6);
+  const closing = "Další krok je ověřit trasu a koupit dostupnou známku v EuroGoPass. ".repeat(8);
+  const body = [intro, filler, practical, closing].join("\n\n");
+  const target = 1600;
+  assert.equal(articleLengthStatus(body, target).valid, false);
+  const trimmed = trimArticleToLengthRange(body, target);
+  assert.equal(articleLengthStatus(trimmed, target).valid, true);
+  assert.match(trimmed, /40 CHF/);
+  assert.match(trimmed, /eurogopass\.com\/cs#home-hero/);
+  assert.doesNotMatch(trimmed, /volnočasových tipů/);
 });
 
 test("editorial target explicitly overrides AI topic length planning", () => {
@@ -241,9 +287,10 @@ test("SEO/GEO refresh runs only when the selected intent set or its priority cha
   assert.equal(keywordSelectionChanged(["primary"], ["primary", "new-supporting"]), true);
 });
 
-test("builds a locale-specific allowlist for planner and country pages", () => {
+test("builds a locale-specific allowlist for planner, Plus and country pages", () => {
   const context = internalLinkContext("de", ["CZ", "AT"]);
   assert.match(context, /https:\/\/eurogopass\.com\/de#home-hero/);
+  assert.match(context, /https:\/\/eurogopass\.com\/de\/plus/);
   assert.match(context, /https:\/\/eurogopass\.com\/de\/coverage\/cz/);
   assert.match(context, /https:\/\/eurogopass\.com\/de\/coverage\/at/);
   assert.doesNotMatch(context, /\/de\/coverage\/sk/);
@@ -268,4 +315,26 @@ test("internal-link audit catches missing and wrong-locale destinations", () => 
   assert.ok(warnings.some(warning => warning.location === "Lokalizace odkazů"));
   assert.ok(warnings.some(warning => warning.location === "Plánovač"));
   assert.ok(warnings.some(warning => warning.location === "Informace o zemi"));
+});
+
+test("strips official websites from customer-facing article body", () => {
+  const body = [
+    "Česko: desetidenní známka. ([edalnice.gov.cz](https://edalnice.gov.cz))",
+    "Slovensko stojí 10,80 €. Pravidla v [EuroGoPass](https://eurogopass.com/cs/coverage/sk) (eznamka.sk).",
+    "Maďarsko: [Informace k maďarské známce](https://eurogopass.com/cs/coverage/hu) (nemzetiutdij.hu).",
+    "Naplánujte [trasu přes EuroGoPass](https://eurogopass.com/cs#home-hero).",
+  ].join(" ");
+  const cleaned = sanitizeCustomerFacingLinks(body);
+  assert.match(cleaned, /https:\/\/eurogopass\.com\/cs#home-hero/);
+  assert.match(cleaned, /https:\/\/eurogopass\.com\/cs\/coverage\/sk/);
+  assert.match(cleaned, /10,80 €/);
+  assert.doesNotMatch(cleaned, /edalnice/i);
+  assert.doesNotMatch(cleaned, /eznamka/i);
+  assert.doesNotMatch(cleaned, /nemzetiutdij/i);
+});
+
+test("internal-link audit rejects leftover official website links", () => {
+  const body = (`Praktické informace jsou na [oficiálním portálu](https://edalnice.gov.cz). [Naplánujte trasu přes EuroGoPass](https://eurogopass.com/cs#home-hero) a [Česko v EuroGoPass](https://eurogopass.com/cs/coverage/cz). `).repeat(3);
+  const warnings = deterministicInternalLinkWarnings({ body_md: body }, "cs", ["CZ"]);
+  assert.ok(warnings.some(warning => warning.location === "Odkazy"));
 });

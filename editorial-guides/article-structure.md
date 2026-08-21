@@ -29,6 +29,8 @@ Pokud článek řeší jednu zemi nebo jeden problém, místo přehledu trasy po
 
 Popiš kroky v pořadí, v jakém je řidič provede. Uveď potřebné údaje, například registrační značku, zemi registrace, kategorii vozidla a začátek platnosti, jen pokud jsou pro daný proces relevantní.
 
+U každého poplatku, který článek řeší, hned řekni, co s ním čtenář udělá v EuroGoPass, pokud je produkt ověřený: zadat trasu, vidět známku i zvláštní úsek, koupit dostupné položky najednou. Nevytvářej z toho samostatnou reklamu; napoj to na právě vysvětlené pravidlo.
+
 ### 5. Výjimky a časté chyby
 
 Zařaď pouze výjimky, které mohou změnit nákup nebo platnost. Typicky jde o:
@@ -57,9 +59,9 @@ Shrň pouze rozhodující informaci a dej konkrétní další krok přes EuroGoP
 
 ## Délka
 
-Respektuj cílový počet znaků z tématu. Za cílovou délku považuj hlavní text článku včetně mezer, nikoli metadata a seznam zdrojů. Běžná odchylka může být přibližně deset procent, pokud přesnější délka nevede k opakování nebo vynechání zásadní informace.
+Respektuj cílový počet znaků z tématu. Za cílovou délku považuj hlavní text článku včetně mezer, nikoli metadata a seznam zdrojů. Povolená odchylka je nejvýše deset procent; piš spíš ke středu až spodku rozsahu a maximum nepřekračuj. Delší text není lepší.
 
-Delší článek nevytvářej přidáváním obecných úvodů, historie bez vztahu k dotazu ani opakováním. Pokud je téma vyčerpáno dříve, dej přednost kvalitě a stručnosti.
+Delší článek nevytvářej přidáváním obecných úvodů, historie bez vztahu k dotazu, výčtu silnic ani opakováním. Pokud je téma vyčerpáno dříve, dej přednost kvalitě a stručnosti. Encyklopedie země bez praktického kroku v EuroGoPass je chyba, ne pečlivost.
 
 ## Titulek, perex a metadata
 
@@ -71,6 +73,6 @@ Delší článek nevytvářej přidáváním obecných úvodů, historie bez vzt
 
 ## Zdroje v článku
 
-Důležitý proměnlivý údaj spoj s odpovídajícím zdrojem. Zdroj musí přímo podporovat tvrzení, u kterého je použit. Obecná domovská stránka instituce nestačí, pokud existuje konkrétní stránka s pravidlem, cenou nebo kategorií vozidla.
+Oficiální státní weby používej jen při rešerši. Jejich URL zapiš do `claims.source_urls`, **ne do těla článku**.
 
-Oficiální státní zdroje slouží hlavně k faktické kontrole, ne jako konkurenční nabídka v textu. Nevkládej samostatné výzvy typu „kupte na oficiálním webu“ ani přehled alternativních míst nákupu, pokud to není výslovným tématem článku. Nezbytný zdroj nebo povinný státní úkon můžeš uvést věcně, bez propagační formulace.
+V `body_md` nesmí být Markdown odkaz, holá adresa ani závorka typu `(edalnice.gov.cz)`, `(eznamka.sk)` nebo `(nemzetiutdij.hu)`. Čtenářské odkazy vedou výhradně na eurogopass.com. Nevkládej výzvy typu „kupte na oficiálním webu“ ani alternativní místa nákupu.

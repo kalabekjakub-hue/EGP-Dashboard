@@ -12,8 +12,10 @@ Tento dokument je závazný pro tvorbu článku, lokalizaci, průběžnou optima
 ## Přirozená četnost a umístění
 
 - V běžném článku použij zpravidla 2 až 4 interní odkazy EuroGoPass podle délky a počtu zemí. Neopakuj stejný cíl vícekrát bez skutečné potřeby.
-- EuroGoPass přirozeně zmiň nejméně jednou v praktické části a jednou v závěrečném dalším kroku, pokud to délka článku dovolí.
-- Alespoň jeden odkaz má vést přímo do plánovače trasy. Pokud článek řeší konkrétní zemi, použij také odkaz na její informační stránku.
+- EuroGoPass přirozeně zmiň nejméně jednou v praktické části u konkrétního poplatku a jednou v závěrečném dalším kroku, pokud to délka článku dovolí.
+- Když článek vysvětluje známku, mýto, most, tunel nebo Free-Flow, hned u daného poplatku řekni, co s ním čtenář může udělat v EuroGoPass. Nevytvářej z toho samostatný reklamní blok.
+- Alespoň jeden odkaz má vést přímo do plánovače trasy. Pokud článek řeší konkrétní zemi a její coverage stránka je v povoleném seznamu, použij ji. Pokud v seznamu není, nevymýšlej ji a zůstaň u plánovače.
+- Když článek zmiňuje EuroGoPass Plus, odkazuj na lokalizovanou stránku Plus. Plus není povinný odkaz v každém článku.
 - Odkaz vlož do věty, která logicky navazuje na právě vysvětlený problém. Nevytvářej reklamní blok uprostřed nesouvisející faktické pasáže.
 - Značku nevkládej do titulku, SEO title ani každého nadpisu jen kvůli četnosti. Nepoužívej nátlak, umělou naléhavost, neověřenou úsporu ani slib, který EuroGoPass nemá doložený.
 
@@ -21,17 +23,19 @@ Tento dokument je závazný pro tvorbu článku, lokalizaci, průběžnou optima
 
 - Kotvu i okolní větu napiš přirozeně v cílovém jazyce.
 - Každý interní odkaz musí používat stejný locale jako jazyková verze článku.
-- Význam odkazu zachovej, ale URL plánovače, přehledu i země přepiš na přesnou lokalizovanou adresu z promptu.
+- Význam odkazu zachovej, ale URL plánovače, přehledu, země i Plus přepiš na přesnou lokalizovanou adresu z promptu.
 - Cizojazyčný anchor text ani odkaz na jinou jazykovou verzi neponechávej jen proto, že byl ve zdrojovém článku.
 
 ## Externí odkazy
 
-- Na oficiální externí zdroj odkazuj pouze tehdy, když přímo podporuje důležité tvrzení a přesná URL byla skutečně získána při rešerši.
-- Nevymýšlej externí URL a neodkazuj na nedůvěryhodný, affiliate nebo nesouvisející web.
-- Interní odkaz EuroGoPass nesmí být vydáván za oficiální státní zdroj.
+- V `body_md`, perexu, titulku i SEO polích smí být klikací odkaz, holá URL i závorka s doménou **pouze** na `https://eurogopass.com/...`.
+- Oficiální státní weby, provozovatele mýta a e-shopy známek (edalnice, eznamka, nemzetiutdij, ASFINAG, EPASS24, AutoPASS, Sanef, ALIAE, SAPN a další) **do zákaznického textu nevkládej**. Ani jako Markdown odkaz, ani jako `(edalnice.gov.cz)`.
+- Přesné URL oficiálních zdrojů patří výhradně do `claims.source_urls` pro interní ověření. Čtenář je v článku nesmí vidět.
+- Nevymýšlej externí URL. Interní odkaz EuroGoPass nesmí být vydáván za oficiální státní zdroj.
+- Další krok čtenáře je vždy plánovač nebo stránka země na eurogopass.com, nikdy registrace nebo nákup na státním portálu.
 
 ## Průběžná optimalizace
 
-- Zachovej existující platné a přirozené odkazy. Oprav pouze chybný locale, neplatnou adresu, slabou kotvu nebo chybějící relevantní další krok.
+- Zachovej existující platné interní odkazy EuroGoPass. Odkazy mimo eurogopass.com odstraň. Oprav pouze chybný locale, neplatnou adresu, slabou kotvu nebo chybějící relevantní další krok.
 - Přidání odkazu nesmí změnit faktický význam věty ani být záminkou k přepsání celé sekce.
 - Pokud se článek jinak nemění, stačí cíleně upravit potřebnou větu nebo doplnit krátký přirozený další krok.

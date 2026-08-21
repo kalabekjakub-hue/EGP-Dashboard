@@ -24,6 +24,13 @@ Tento dokument je závazný pro návrh tématu, výběr klíčových slov a opě
 - Titulek musí přirozeně vystihnout celý cluster. Výčet variant použij jen tehdy, když zůstane čitelný.
 - Doporučenou délku článku odvoď od počtu skutečných podzáměrů. Široký srovnávací článek potřebuje více prostoru než jediná úzká odpověď; délku nezvyšuj výplní.
 
+## Priorita a rozmanitost
+
+- Prioritu výrazu počítá backend z poptávky a čítačů využití. Po návrhu tématu nebo vygenerování článku priorita použitých výrazů rapidně klesne.
+- Neopakuj stejný cluster, stejné primární klíčové slovo ani téměř stejný titulek.
+- Nové téma stav na nevyužitých výrazech. Použitý výraz smíš vzít jen jako podpůrný v jiné kombinaci a jiném praktickém záměru.
+- Pool je seřazený podle klesající priority. Preferuj výrazy s `unused: true` a vyšším `opportunity_score`.
+
 ## Příklad granularity
 
 Dotazy „rakouská dálniční známka“, „rakouská známka cena“, „jednodenní známka Rakousko“, „desetidenní známka Rakousko“, „dvouměsíční známka Rakousko“ a „roční známka Rakousko“ obvykle tvoří jeden hlavní cluster. Výsledkem má být obsáhlý průvodce rakouskou dálniční známkou a jednotlivé délky platnosti mají být jeho sekce. Samostatný článek o desetidenní známce vznikne jen při skutečně silném a odlišném uživatelském záměru.

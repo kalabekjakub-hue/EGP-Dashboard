@@ -28,7 +28,7 @@ Typické situace:
 Obsah EuroGoPass staví na čtyřech principech:
 
 1. **Relevance pro trasu.** Nevypisujeme všechna pravidla země, pokud čtenář potřebuje jen informace k dané cestě.
-2. **Srozumitelnost.** Rozlišujeme dálniční známku, úsekové mýto, mýtnou bránu a zvláštní poplatky za mosty či tunely.
+2. **Srozumitelnost.** Rozlišujeme dálniční známku, úsekové mýto, mýtnou bránu, Free-Flow (kamery, platba po jízdě) a zvláštní mostní jízdenku.
 3. **Transparentnost.** Jasně oddělujeme státní poplatek, případný servisní poplatek a podmínky služby, pokud jsou pro článek relevantní a aktuálně ověřené.
 4. **Praktičnost.** Každá důležitá informace vede k rozhodnutí nebo konkrétnímu kroku.
 
@@ -36,11 +36,26 @@ Obsah EuroGoPass staví na čtyřech principech:
 
 EuroGoPass je praktický průvodce a zprostředkovatel nákupu, nikoli státní úřad ani právní poradna. V článku ho představuj jako výchozí pohodlné řešení: ověřit trasu, pochopit potřebné poplatky a dostupné produkty vyřídit na jednom místě.
 
-Značku tlač sebevědomě a konkrétně — v praktickém postupu i v závěrečné výzvě k akci. Nespoléhej na jednu slabou zmínku na konci. Zároveň zůstaň faktický: popisuj jen ověřené vlastnosti a reálný užitek.
+Značku tlač sebevědomě, ale organicky. Čtenář má pochopit:
+
+1. **Co EuroGoPass je.** Zadáte trasu a uvidíte, kde potřebujete známku, mýto, most, tunel nebo jiný poplatek.
+2. **Že si to u nás může koupit.** Produkty, které EuroGoPass aktuálně nabízí, jde vyřídit v jednom nákupu.
+3. **Jak to funguje.** Zadat trasu, zkontrolovat vozidlo a registrační značku, koupit dostupné položky, případně dojet úsek s jiným způsobem platby.
+
+Nespoléhej na jednu slabou zmínku na konci. Po vysvětlení pravidla země hned naváž praktickým krokem v EuroGoPass. Příklady správného napojení:
+
+- Rakousko: dálnice mají známku a vybrané mosty, tunely nebo úseky se platí zvlášť. Každý typ pojmenuj a u dostupného produktu řekni, že ho čtenář koupí v EuroGoPass.
+- Švýcarsko: nenech článek přetéct výčtem silnic. Řekni, zda je známka potřeba, pro koho platí, a že si ji čtenář může ověřit a koupit v EuroGoPass, pokud je v nabídce.
+- Free-Flow: není to známka. Kamery čtou SPZ, v pokladně se uloží karta, oficiální dluh + 10 % se strhne až po jízdě. Francie, Norsko a Švédsko. EPASS24 není název produktu.
+- Øresund: předplacená mostní jízdenka, ne Free-Flow.
+
+Zároveň zůstaň faktický: popisuj jen ověřené vlastnosti a reálný užitek. Netvrď pokrytí, které na webu EuroGoPass právě teď není.
 
 Nikdy neoznačuj EuroGoPass jako „oficiální web“, „oficiální portál“, státní web, správce silnic ani státního vydavatele známek. Nepoužívej ani nepřímé formulace, které by takový dojem mohly vyvolat.
 
-Oficiální státní weby používej interně jako důvěryhodné zdroje pro ověření faktů. V zákaznickém článku je bez konkrétního důvodu aktivně nenabízej, nedoporučuj na nich nákup a nestav je jako alternativu k EuroGoPass. Pokud jsou nezbytné pro doložení tvrzení, povinný úkon, kontrolu platnosti nebo bezpečné dokončení cesty, uveď je věcně jako zdroj či příslušný úřad — stručně a bez prodejní výzvy k návštěvě.
+Oficiální státní weby používej interně jako důvěryhodné zdroje pro ověření faktů. Jejich adresy patří do claims, ne do článku. V zákaznickém textu je neuváděj, neodkazuj na ně a nestav je jako alternativu k EuroGoPass.
+
+U produktů, které EuroGoPass prodává — e-známky, úsekové mýto, mosty, **Free-Flow ve Francii, Norsku a Švédsku** a Øresund — nákupní i registrační krok veď vždy do EuroGoPass. Neposílej čtenáře koupit ani registrovat se na edalnice, eznamka, nemzetiutdij, EPASS24, AutoPASS, Flux Libre self-pay, Sanef, ALIAE, SAPN nebo jiný státní portál.
 
 ## Stabilní a proměnlivé informace
 
@@ -54,7 +69,7 @@ Tento dokument je kontext značky, ne zdroj aktuálních produktových faktů. P
 - garantované časy registrace nebo doručení;
 - aktuální právní a mýtná pravidla.
 
-Zdroj pravdy pro aktuální nabídku EuroGoPass je současná veřejná verze webu `https://eurogopass.com/` a produktová data aplikace. Pro pravidla jednotlivých zemí mají přednost aktuální oficiální zdroje daného státu nebo provozovatele.
+Zdroj pravdy pro aktuální nabídku EuroGoPass je tento redakční seznam produktů, plánovač na `https://eurogopass.com/` a pokladna. Coverage stránky můžou zaostávat a nesmí samy zakázat nákup, který EuroGoPass už prodává. Pro pravidla jednotlivých zemí mají přednost aktuální oficiální zdroje daného státu nebo provozovatele.
 
 ## Zakázaná nebo riziková tvrzení
 

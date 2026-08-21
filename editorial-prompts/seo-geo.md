@@ -59,8 +59,8 @@ Před odevzdáním výsledek interně oprav, dokud platí:
 - vybraná klíčová slova jsou použitá přirozeně nebo významově lokalizovaná;
 - nadpisy jsou konkrétní a pasáže samostatně pochopitelné;
 - text neobsahuje násilné opakování ani cizojazyčný výraz v nesprávné lokalizaci;
-- proměnlivá fakta mají odpovídající zdroj nebo jsou označená k ruční kontrole;
-- závěrečná zmínka EuroGoPass je organická a nepřidává neověřený slib.
+- proměnlivá fakta jsou ověřená a uložená v claims; v těle článku neuváděj oficiální URL ani závorku s cizí doménou;
+- závěrečná zmínka EuroGoPass je organická, navazuje na praktický další krok a nepřidává neověřený slib.
 - plánovač a relevantní stránky zemí mají klikací, lokalizované a popisné Markdown odkazy bez vymyšlených URL.
 
 Do `keyword_usage` uveď primární záměr a přesné neprázdné formulace skutečně přítomné v titulku, perexu, SEO title, meta description a těle. Nevymýšlej formulaci, která ve výsledném poli není; backend její přítomnost ověřuje.
