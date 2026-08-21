@@ -26,7 +26,7 @@ Přístup k dashboardu je omezen explicitním serverovým allowlistem `EGP_ADMIN
 
 Redakční endpoint `DELETE /api/editorial/topics/:id` smí smazat pouze vybrané téma z tabulky `blog_topic_queue`. Nesmí mazat navázaný článek, překlady ani žádná obchodní data. Ostatní zápisy Redakce musí zůstat omezené na tabulky `blog_*` a redakční úložiště.
 
-Při zapnuté automatizaci smí samostatný redakční worker vytvářet AI témata, generační auditní záznamy, nepublikované články, jejich jazykové koncepty, zdroje a ověřovaná tvrzení, a to pouze v tabulkách `blog_*`. Automatizace se musí zastavit ve stavu ke kontrole a nikdy nesmí sama publikovat. Publikaci smí vyvolat pouze přihlášený uživatel.
+Při zapnuté automatizaci smí samostatný redakční worker vytvářet AI témata, generační auditní záznamy, nepublikované české články, jejich zdroje a ověřovaná tvrzení, a to pouze v tabulkách `blog_*`. Worker nesmí sám spouštět překlady. Automatizace se musí zastavit ve stavu ke kontrole a nikdy nesmí sama publikovat. Publikaci i překlady smí vyvolat pouze přihlášený uživatel.
 
 Redakční endpoint `DELETE /api/editorial/articles/:id/hero` smí odstranit pouze hlavní obrázek daného článku z bucketu `blog-hero-images` a vyprázdnit `blog_posts.hero_image_url`. Nesmí měnit ani mazat jiné soubory, článek, překlady nebo obchodní data.
 
@@ -42,7 +42,7 @@ Endpointy `GET /api/editorial/keywords` a `POST /api/editorial/keywords/import` 
 
 Návrh tématu musí před výběrem článku posoudit společný významový cluster napříč jazyky a metrikami. Cena, nákup, kontrola a délky platnosti stejného produktu v jedné zemi se mají standardně stát podsekcemi jednoho hlavního článku; samostatné úzké téma je přípustné pouze při odlišném praktickém postupu nebo silném vlastním záměru. Počet navázaných výrazů nemá pevné minimum ani maximum. Řazení kandidátů musí být deterministické a rozmanitost se smí řídit pouze redakčními čítači využití, nikoli náhodným přeskupením jednotlivých dotazů.
 
-Vygenerovaný český `body_md` musí mít délku včetně mezer v rozsahu ±10 % od `blog_topic_queue.target_characters`. Backend musí délku po generování přepočítat a mimo rozsah provést nejvýše tři cílené opravy bez webové rešerše, změny faktů, čísel nebo odkazů. Pokud ani opravený text rozsah nesplní, článek se nesmí uložit a generační běh musí skončit chybou. Pro cíl 4 500 znaků je tedy povolený rozsah 4 050–4 950 znaků.
+Vygenerovaný český `body_md` má cílit na `blog_topic_queue.target_characters` včetně mezer, plus minus 10 %. Prompt musí délku zadat jako závazný počet znaků s tímto pásmem a s preferencí trefit cíl ± 30 znaků bez překročení maxima. Backend musí délku po generování přepočítat a mimo rozsah provést nejvýše tři cílené opravy bez webové rešerše, změny faktů, čísel nebo odkazů. Pokud ani opravený text rozsah nesplní, článek se i tak uloží ke kontrole a délka se zapíše jen jako neblokující redakční upozornění; generační běh nesmí kvůli délce selhat. Pro cíl 4 500 znaků je preferovaný rozsah 4 050–4 950 znaků.
 
 Při ručním kliknutí na návrh tématu pomocí AI musí `POST /api/editorial/topics/suggest` přijmout aktuální hodnotu `targetCharacters` z pole redaktora v rozsahu 500–12 000 a uložit ji beze změny do `blog_topic_queue.target_characters`. Tato explicitní hodnota má přednost před automatickým odhadem šíře clusteru. AI smí délku sama navrhnout pouze pro automatizaci nebo jiný redakční běh, který `targetCharacters` neposlal.
 

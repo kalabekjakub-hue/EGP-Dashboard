@@ -122,7 +122,7 @@ Handler v `editorial-api.ts`. Zápisy pouze do `blog_*` a bucketu `blog-hero-ima
 - **24 jazyků:** `bg, hr, cs, da, nl, en, et, fi, fr, de, el, hu, ga, it, lv, lt, mt, pl, pt, ro, sk, sl, es, sv`
 - **Style profiles:** `balanced` | `factual` | `roadmate`
 - **SEO/GEO skóre:** poradní 0–100; **nesmí** blokovat ani spouštět publikaci
-- **Délka CZ:** `body_md` v rozsahu ±10 % od `target_characters`; max 3 opravy délky, jinak běh selže
+- **Délka CZ:** `body_md` cílí na ±10 % od `target_characters`; max 3 opravy délky, mimo rozsah se článek uloží s neblokujícím upozorněním
 
 ## Chybové stavy
 

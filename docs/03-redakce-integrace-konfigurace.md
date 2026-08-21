@@ -15,7 +15,7 @@ AI-asistovaná tvorba praktických SEO článků o cestování, dálničních zn
 ## Cíl článku
 
 - Praktický text (řádově jedna A4)
-- `target_characters` **500–12 000**, při generování CZ tolerance **±10 %**
+- `target_characters` **500–12 000**, při generování CZ cíl **±10 %**; po třech opravách se text uloží i mimo rozsah
 - Organické představení EuroGoPass na konci
 - SEO + GEO dohledatelnost
 
@@ -29,7 +29,7 @@ AI-asistovaná tvorba praktických SEO článků o cestování, dálničních zn
 5. Lidská publikace balíku (neúspěšné jazyky neblokují úspěšné)
 ```
 
-**Automatizace nesmí sama publikovat.** Worker končí ve stavu ke kontrole.
+**Automatizace nesmí sama publikovat ani překládat.** Worker končí u českého konceptu ke kontrole.
 
 ## UI
 

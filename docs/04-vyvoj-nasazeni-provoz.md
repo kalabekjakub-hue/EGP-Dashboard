@@ -207,7 +207,7 @@ Refresh token, `mail-senders.json`, lookback/interval, objednávka ještě není
 
 ### Redakce chyby
 
-API key / modely, délka mimo ±10 %, `max_pending_reviews`, `enabled=false`, OpenAI rate limits → `blog_generation_runs.error`.
+API key / modely, `max_pending_reviews`, `enabled=false`, OpenAI rate limits → `blog_generation_runs.error`. Délka mimo ±10 % článek nezahodí.
 
 ### Deploy CI selhal
 

@@ -227,6 +227,14 @@ export function articleLengthStatus(body: unknown, targetCharacters: number) {
   return { ...range, actual, valid: actual >= range.minimum && actual <= range.maximum };
 }
 
+export function articleLengthPrompt(targetCharacters: number) {
+  const range = articleLengthRange(targetCharacters);
+  const target = range.target.toLocaleString("cs-CZ");
+  const min = range.minimum.toLocaleString("cs-CZ");
+  const max = range.maximum.toLocaleString("cs-CZ");
+  return `Napiš článek na zadané téma. Hlavní text body_md musí mít ${target} znaků včetně mezer, plus minus 10 % (povoleno ${min}–${max}). Snaž se trefit ${target} ± 30 znaků. Maximum ${max} nepřekračuj. Před odesláním si délku body_md skutečně spočítej a zkrať výplň, ne fakta ani odkazy.`;
+}
+
 export function requestedArticleLength(value: unknown) {
   if (value === undefined || value === null || value === "") return null;
   const target = Math.round(Number(value));
@@ -719,11 +727,11 @@ async function fitArticleLength(article: Record<string, unknown>, targetCharacte
   let lastSafetyIssue = "";
   for (let attempt = 0; attempt <= maxArticleLengthRepairs; attempt += 1) {
     const status = articleLengthStatus(current.body_md, targetCharacters);
-    if (status.valid) return { article: current, usage };
+    if (status.valid) return { article: current, usage, length: status, acceptedOutOfRange: false };
     if (attempt === maxArticleLengthRepairs) break;
     const direction = status.actual < status.minimum ? "rozšiř" : "zkrať";
     const generated = await openaiResponse(`# Cíl
-${direction === "rozšiř" ? "Rozšiř" : "Zkrať"} pouze hlavní Markdown text článku tak, aby měl ${status.minimum} až ${status.maximum} znaků včetně mezer. Ideální cíl je ${status.target} znaků; současný text má ${status.actual} znaků.
+${direction === "rozšiř" ? "Rozšiř" : "Zkrať"} pouze hlavní Markdown text článku. ${articleLengthPrompt(status.target)} Současný text má ${status.actual.toLocaleString("cs-CZ")} znaků, takže je mimo rozsah. ${direction === "zkrať" ? `Zkrať ho pod ${status.maximum.toLocaleString("cs-CZ")} znaků.` : `Doplň ho alespoň na ${status.minimum.toLocaleString("cs-CZ")} znaků.`}
 
 # Nepřekročitelné hranice
 - Zachovej význam, všechna fakta, čísla, ceny, data, podmínky, výjimky, názvy entit a míru jistoty.
@@ -752,9 +760,7 @@ ${lastSafetyIssue ? `\n# Předchozí oprava byla odmítnuta\n${lastSafetyIssue}`
     lastSafetyIssue = "";
   }
   const status = articleLengthStatus(current.body_md, targetCharacters);
-  const error = new Error(`AI nedodržela cílovou délku článku ${status.target} znaků. Výsledek má ${status.actual} znaků, povolený rozsah je ${status.minimum}–${status.maximum}.`);
-  (error as Error & { repairUsage?: AiTokenUsage | null }).repairUsage = usage;
-  throw error;
+  return { article: current, usage, length: status, acceptedOutOfRange: !status.valid };
 }
 
 function topicSchema(requireKeyword: boolean) {
@@ -1096,11 +1102,13 @@ async function generateArticle(topicId: string) {
     const prompt = `# Cíl
 Vytvoř praktický český článek EuroGoPass na téma: ${topic.topic}
 
+# Délka
+${articleLengthPrompt(targetRange.target)}
+
 # Úspěšný výsledek
 - Hlavní uživatelský záměr je konzistentně a přirozeně pokrytý v titulku, první větě perexu, SEO title, meta description, slugu, úvodu a relevantních odpovědních sekcích.
 - Čtenář dostane přímou odpověď dříve než vysvětlení a po přečtení ví, co se týká jeho trasy či vozidla a co má udělat.
 - H2/H3 jsou konkrétní, první věta každé důležité sekce odpovídá na její nadpis a pasáž je pochopitelná i samostatně pro citační AI systém.
-- Cíl hlavního textu je ${targetRange.target} znaků včetně mezer. Povolený rozsah je ${targetRange.minimum}–${targetRange.maximum} znaků (±10 %); před vrácením délku skutečně přepočítej.
 
 # Rešerše a fakta
 - Použij webovou rešerši. Důležitá proměnlivá fakta ověř z více zdrojů; ceny, platnost a právní pravidla preferenčně z aktuálních oficiálních zdrojů.
@@ -1120,6 +1128,10 @@ Vytvoř praktický český článek EuroGoPass na téma: ${topic.topic}
     const fitted = await fitArticleLength(article, target, articleModel);
     article = fitted.article;
     if (fitted.usage) recordedUsage = combinedAiTokenUsage(recordedUsage, fitted.usage);
+    if (fitted.acceptedOutOfRange) {
+      const lengthWarning = { severity: "info" as const, location: "Délka", message: `Text má ${fitted.length.actual.toLocaleString("cs-CZ")} znaků při cíli ${fitted.length.target.toLocaleString("cs-CZ")} (povoleno ${fitted.length.minimum.toLocaleString("cs-CZ")}–${fitted.length.maximum.toLocaleString("cs-CZ")}).` };
+      article.seo_geo_warnings = [...normalizeSeoGeoWarnings(article.seo_geo_warnings), lengthWarning];
+    }
     const mandatoryLinkWarnings = deterministicInternalLinkWarnings(article, "cs", article.countries).filter(warning => warning.severity === "warning");
     if (mandatoryLinkWarnings.length) throw new Error(`Článek neprošel kontrolou interních odkazů: ${mandatoryLinkWarnings[0].location} – ${mandatoryLinkWarnings[0].message}`);
     const post = (await supabase("blog_posts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({
@@ -1230,15 +1242,6 @@ export async function runEditorialAutomationCycle() {
   const weekday = ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 } as Record<string, number>)[part("weekday")];
   if (!(settings.weekdays as number[] | undefined)?.includes(weekday) || Number(part("hour")) < Number(settings.generation_hour ?? 7)) return { action: "outside_schedule" };
   const review = await supabase("blog_topic_queue?status=eq.review&select=id,post_id&order=updated_at.asc") as Array<Record<string, unknown>>;
-  for (const item of review) {
-    if (!item.post_id) continue;
-    const drafts = await supabase(`blog_translation_drafts?post_id=eq.${encodeURIComponent(String(item.post_id))}&select=locale`) as Array<Record<string, unknown>>;
-    const published = await supabase(`blog_post_translations?post_id=eq.${encodeURIComponent(String(item.post_id))}&select=locale`) as Array<Record<string, unknown>>;
-    if (new Set([...drafts, ...published].map(row => String(row.locale))).size < editorialLocales.length) {
-      const result = await generateTranslations(String(item.post_id), "cs");
-      return { action: "completed_translations", postId: item.post_id, locales: result.locales };
-    }
-  }
   const limit = Number(settings.max_pending_reviews ?? 10);
   if (limit > 0 && review.length >= limit) return { action: "pending_limit", count: review.length };
   const pragueDate = `${part("year")}-${part("month")}-${part("day")}`;
@@ -1255,8 +1258,7 @@ export async function runEditorialAutomationCycle() {
   }
   const queued = await enqueueArticleGeneration(String(topics[0].id));
   const result = await queued.promise;
-  const translations = await generateTranslations(String(result.post.id), "cs");
-  return { action: "generated", postId: result.post.id, suggestedTopic, translatedLocales: translations.locales };
+  return { action: "generated", postId: result.post.id, suggestedTopic };
 }
 
 async function generateTranslations(postId: string, sourceLocale: string) {

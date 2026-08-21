@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
+import { articleLengthPrompt, articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, keywordClustersContract, keywordOpportunityScore, keywordRows, keywordSelectionChanged, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, requestedArticleLength, seoContentHash, seoGeoContract, seoRefreshSafety, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -101,6 +101,15 @@ test("article target of 4500 characters allows only a ten percent deviation", ()
   assert.equal(articleLengthStatus("x".repeat(4950), 4500).valid, true);
   assert.equal(articleLengthStatus("x".repeat(4049), 4500).valid, false);
   assert.equal(articleLengthStatus("x".repeat(4951), 4500).valid, false);
+});
+
+test("article length prompt states the exact target and ten percent band", () => {
+  const prompt = articleLengthPrompt(4500);
+  assert.match(prompt, /4.?500/);
+  assert.match(prompt, /10 %/);
+  assert.match(prompt, /± 30/);
+  assert.match(prompt, /4.?050/);
+  assert.match(prompt, /4.?950/);
 });
 
 test("editorial target explicitly overrides AI topic length planning", () => {
