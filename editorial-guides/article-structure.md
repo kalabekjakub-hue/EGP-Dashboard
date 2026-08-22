@@ -29,14 +29,14 @@ Pokud článek řeší jednu zemi nebo jeden problém, místo přehledu trasy po
 
 Popiš kroky v pořadí, v jakém je řidič provede. Uveď potřebné údaje, například registrační značku, zemi registrace, kategorii vozidla a začátek platnosti, jen pokud jsou pro daný proces relevantní.
 
-U každého poplatku, který článek řeší, hned řekni, co s ním čtenář udělá v EuroGoPass, pokud je produkt ověřený: zadat trasu, vidět známku i zvláštní úsek, koupit dostupné položky najednou. Nevytvářej z toho samostatnou reklamu; napoj to na právě vysvětlené pravidlo.
+U každého poplatku, který článek řeší, nejdřív vysvětli pravidlo. Hned potom popiš, jak to čtenář vyřídí v EuroGoPass: coverage stránku země, pokud je v seznamu, a nákup nebo naplánování trasy v plánovači. Tato nákupní pasáž je povinná, není to volitelná reklama.
 
 ### 5. Výjimky a časté chyby
 
 Zařaď pouze výjimky, které mohou změnit nákup nebo platnost. Typicky jde o:
 
-- jinou kategorii podle hmotnosti nebo počtu náprav;
-- zvláštní pravidla pro motocykl, přívěs, obytné vozidlo či půjčený vůz;
+- hranici 3,5 t u známky (jedna věta, bez návodu pro kamiony);
+- zvláštní pravidla pro motocykl, přívěs, obytné vozidlo či půjčený osobní vůz;
 - samostatně placený most, tunel nebo úsek;
 - chybu v registrační značce či zemi registrace;
 - odlišný okamžik začátku platnosti.
@@ -45,7 +45,7 @@ Nevytvářej dlouhý seznam málo pravděpodobných situací bez vztahu k témat
 
 ### 6. Stručný závěr a další krok
 
-Shrň pouze rozhodující informaci a dej konkrétní další krok přes EuroGoPass: ověřit trasu, zkontrolovat potřebné produkty nebo dokončit nákup. Nepřidávej nový fakt, který nebyl vysvětlen v hlavním textu.
+Shrň pouze rozhodující informaci a dej konkrétní další krok přes EuroGoPass: ověřit trasu, zkontrolovat potřebné produkty nebo dokončit nákup. Nepřidávej nový fakt, který nebyl vysvětlen v hlavním textu. Krátké H2 otázky (FAQ) jsou v pořádku, pokud skutečně pokrývají hledaný záměr a každá začíná přímou odpovědí.
 
 ## Formát Markdown
 
@@ -75,4 +75,4 @@ Delší článek nevytvářej přidáváním obecných úvodů, historie bez vzt
 
 Oficiální státní weby používej jen při rešerši. Jejich URL zapiš do `claims.source_urls`, **ne do těla článku**.
 
-V `body_md` nesmí být Markdown odkaz, holá adresa ani závorka typu `(edalnice.gov.cz)`, `(eznamka.sk)` nebo `(nemzetiutdij.hu)`. Čtenářské odkazy vedou výhradně na eurogopass.com. Nevkládej výzvy typu „kupte na oficiálním webu“ ani alternativní místa nákupu.
+V `body_md` nesmí být Markdown odkaz, holá adresa, závorka typu `(edalnice.gov.cz)` ani holý název portálu. Nepiš, že jsi údaj vzal z oficiálního webu. Čtenářské odkazy vedou výhradně na eurogopass.com. Další krok je vždy EuroGoPass, nikoli státní e-shop.

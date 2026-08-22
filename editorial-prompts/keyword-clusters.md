@@ -14,8 +14,9 @@ Tento dokument je závazný pro návrh tématu, výběr klíčových slov a opě
 - Varianty stejného produktu nebo stejného rozhodnutí jsou zpravidla části jednoho hlavního článku. Typicky jde o cenu, nákup, začátek platnosti, kontrolu, jeden den, deset dní, měsíc, dva měsíce nebo rok u dálniční známky stejné země.
 - Takové varianty rozděl do konkrétních H2/H3, tabulky nebo rozhodovacího přehledu. Nevytvářej z každé délky platnosti automaticky samostatný článek.
 - Širší hlavní článek preferuj, pokud společný cluster pokrývá jednu zemi, jeden produkt a jeden navazující krok uživatele.
-- Samostatné úzké téma zvol pouze tehdy, když má odlišný praktický postup, jinou skupinu vozidel, zvláštní právní režim, samostatně placený úsek nebo prokazatelně silný vlastní záměr, který by se v hlavním článku nedal dostatečně zodpovědět.
-- Nespojuj témata pouze kvůli názvu země. Dálniční známka, ekologická plaketa, mýto pro těžká vozidla a konkrétní tunel mohou být odlišné úkoly uživatele.
+- Samostatné úzké téma zvol pouze tehdy, když má odlišný praktický postup, jinou skupinu vozidel **v katalogu do 3,5 t** (motocykl vs osobní auto), zvláštní právní režim, samostatně placený úsek z nabídky EuroGoPass nebo prokazatelně silný vlastní záměr, který by se v hlavním článku nedal dostatečně zodpovědět.
+- Nespojuj témata pouze kvůli názvu země. Dálniční známka, Free-Flow a samostatně prodávaný most stejné země můžou být odlišné úkoly, **pokud oba produkty EuroGoPass skutečně prodává**.
+- Dotaz o nákladních autech, LKW, TIR, GO-Box, HU-GO, mýtu nad 3,5 t, ekologické plaketě nebo emisní zóně **není** cluster EuroGoPass. Neber ho jako primární záměr, ani když zmiňuje prodejní zemi. Pokud v clusteru zůstanou takové výrazy, vyřaď je.
 
 ## Výstup clusteru
 
@@ -30,6 +31,8 @@ Tento dokument je závazný pro návrh tématu, výběr klíčových slov a opě
 - Neopakuj stejný cluster, stejné primární klíčové slovo ani téměř stejný titulek.
 - Nové téma stav na nevyužitých výrazech. Použitý výraz smíš vzít jen jako podpůrný v jiné kombinaci a jiném praktickém záměru.
 - Pool je seřazený podle klesající priority. Preferuj výrazy s `unused: true` a vyšším `opportunity_score`.
+- Hlavní téma musí být produkt z katalogu EuroGoPass pro osobní a lehká vozidla do 3,5 t. Destinace bez nabídky (Itálie, Bosna, Řecko, cizí most, město) smí být jen kontext cesty, nikoli primární záměr. Nákladní mýto a neprodávané systémy nesmí být primární záměr nikdy.
+- Článek z clusteru musí počítat se sekcí, jak daný produkt koupit nebo naplánovat v EuroGoPass. Oficiální státní weby do tématu ani do čtenářského textu nepatří.
 
 ## Příklad granularity
 

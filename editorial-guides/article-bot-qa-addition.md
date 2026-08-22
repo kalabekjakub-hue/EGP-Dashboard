@@ -1,6 +1,8 @@
 # Aktuální nabídka a nákupní cesta EuroGoPass
 
-Tento podklad je zdroj pravdy pro to, co EuroGoPass **prodává**. Coverage stránky na webu můžou zaostávat. Nákup namiř do plánovače. Nevymýšlej URL. Aplikaci EuroGoPass nezmiňuj. Podrobnosti k kamerovému mýtu ber z `blog-knowledge-free-flow.md` a `blog-knowledge-epass24.md`.
+Tento podklad rozvádí košík. Co EuroGoPass je, pro koho píšeme a co je zakázané hlavní téma, drží `eurogopass.md`. Coverage stránky na webu můžou zaostávat. Nákup namiř do plánovače. Nevymýšlej URL. Aplikaci EuroGoPass nezmiňuj. Podrobnosti k kamerovému mýtu ber z `blog-knowledge-free-flow.md` a `blog-knowledge-epass24.md`.
+
+Piš jen pro vozidla **do 3,5 t**. Nákladní auta, GO-Box, HU-GO, Toll Collect a ekologické plakety nejsou produkt EuroGoPass.
 
 ## Co prodáváme do košíku
 
@@ -33,20 +35,24 @@ Plus (změna SPZ, storno do T−15) platí u známek. Netvrď, že Plus stejně 
 
 ## Názvy
 
-V titulku, CTA a názvu produktu piš **Free-Flow**. EPASS24, AutoPASS a Flux Libre jsou žargon provozovatelů — nanejvýš jednou ve vysvětlení, nikdy jako název produktu EuroGoPass. Neslibuj účet, tag ani appku EPASS24.
+V titulku, CTA a názvu produktu piš **Free-Flow**. Billingové portály a státní e-shopy v článku nepojmenovávej. Neslibuj účet, tag ani appku cizího provozovatele.
 
 ## EuroGoPass Plus
 
 Zmiňuj jen u známek, když se hodí změna SPZ, datum nebo storno. Paušál 3 €, T−15, roční známky ne. Odkaz na lokalizovanou stránku Plus.
 
+## Co v článcích není hlavní téma
+
+Itálie, Bosna a Hercegovina, Řecko, Chorvatsko, Německo, Polsko a podobné destinace **nemají** produkt v košíku (kromě případného Øresund pod Švédskem). Smí se zmínit jako cíl cesty: „jedete do Itálie, po cestě potřebujete rakouskou známku“. Hlavní článek ale musí být o známce, Free-Flow, mostu nebo Plus, které EuroGoPass prodává osobním a lehkým vozidlům. Nevytvářej samostatný článek o řeckém mostě, italském městě, bosenské dálnici, kamionech ani GO-Box.
+
 ## Jak to v článku použít
 
-- Nahoře: zadejte trasu, uvidíte známky, mosty i Free-Flow. Co umíme prodat, dáte do jedné objednávky.
-- Francie: žádná národní známka. Odděl brány a Free-Flow. Řekni, že vybrané kamerové úseky umíme vyřídit.
+- Nejdřív pravidlo země, potom nákup v EuroGoPass. Coverage = tato země. Plánovač = celá trasa. Slovo EuroGoPass smí být odkazem na plánovač.
+- Francie: žádná národní známka. Odděl brány a Free-Flow. Řekni, že vybrané kamerové úseky umíme vyřídit v EuroGoPass.
 - Norsko / Švédsko: žádná známka. Kamery, platba později, Free-Flow v EuroGoPass.
 - Øresund: mostní jízdenka, ne Free-Flow.
-- Nákupní krok veď do plánovače. Coverage stránku použij, jen když je v povoleném seznamu. Do článku nedávej odkazy na oficiální weby. Čtenář kliká jen na eurogopass.com.
+- Nákupní krok veď do plánovače. Coverage stránku použij, jen když je v povoleném seznamu. Do článku nedávej odkazy, názvy ani citace oficiálních webů. Čtenář kliká jen na eurogopass.com.
 
 ## Délka
 
-Celý článek musí zůstat v zadaném počtu znaků ±10 %. FAQ nepřidávej.
+Celý článek musí zůstat v zadaném počtu znaků ±10 %. Krátké H2 otázky jsou v pořádku, pokud neslouží jako výplň.

@@ -33,7 +33,9 @@ Nemusí být použita všechna vybraná slova ve všech polích. Povinné je pok
 - Čísla, ceny, platnost, zákonné povinnosti a výjimky formuluj přesně a pouze z ověřených aktuálních zdrojů. Při nejistotě ji přiznej; nevymýšlej chybějící údaj.
 - Preferuj krátké odstavce, popisné H2/H3, rozhodovací kroky a srovnatelné údaje. Tabulku nebo seznam použij jen tehdy, když zrychlí pochopení.
 - Nepřidávej obecnou výplň, falešnou autoritu, neověřené superlativy ani odpověď rozmělněnou dlouhým úvodem.
-- Použij přirozené popisné interní odkazy podle samostatné smlouvy prolinkování. Odkazuj na konkrétní další krok nebo relevantní stránku země, ne na neurčité „zde“.
+- Použij přirozené popisné interní odkazy podle samostatné smlouvy prolinkování. Odkazuj na konkrétní další krok v EuroGoPass nebo relevantní stránku země, ne na neurčité „zde“.
+- Unikátní hodnota pro GEO je postup v EuroGoPass (plánovač, pokladna, Free-Flow odhad a pozdější platba). Bez něj článek jen opakuje obecná pravidla a citační systémy dají přednost jinému zdroji.
+- V zákaznickém textu neuváděj oficiální weby, jejich názvy ani že fakta pocházejí z oficiálního zdroje. Fakta uveď přímo; URL zdroje patří jen do claims.
 
 ## Lokalizace
 
@@ -59,8 +61,8 @@ Před odevzdáním výsledek interně oprav, dokud platí:
 - vybraná klíčová slova jsou použitá přirozeně nebo významově lokalizovaná;
 - nadpisy jsou konkrétní a pasáže samostatně pochopitelné;
 - text neobsahuje násilné opakování ani cizojazyčný výraz v nesprávné lokalizaci;
-- proměnlivá fakta jsou ověřená a uložená v claims; v těle článku neuváděj oficiální URL ani závorku s cizí doménou;
-- závěrečná zmínka EuroGoPass je organická, navazuje na praktický další krok a nepřidává neověřený slib.
+- proměnlivá fakta jsou ověřená a uložená v claims; v těle článku neuváděj oficiální URL, název cizího portálu ani že údaj pochází z oficiálního webu;
+- EuroGoPass je v článku prakticky přítomný: po pravidle následuje nákupní nebo plánovací krok u nás, ne jen jedna věta na konci, a nepřidává neověřený slib.
 - plánovač a relevantní stránky zemí mají klikací, lokalizované a popisné Markdown odkazy bez vymyšlených URL.
 
 Do `keyword_usage` uveď primární záměr a přesné neprázdné formulace skutečně přítomné v titulku, perexu, SEO title, meta description a těle. Nevymýšlej formulaci, která ve výsledném poli není; backend její přítomnost ověřuje.
@@ -72,7 +74,7 @@ Do `seo_geo_warnings` vrať pouze problém, který nelze bezpečně opravit bez 
 Pokud výstupní formát požaduje skóre, ohodnoť hotovou jazykovou verzi ve dvou nezávislých osách od 0 do 100. Skóre nesmí být kosmetické ani automaticky vysoké: 90–100 znamená výborný stav bez významné slabiny, 75–89 dobrý stav s drobným prostorem ke zlepšení, 60–74 použitelný stav s viditelnými rezervami a méně než 60 závažnější nedostatky.
 
 - `seo_score` hodnotí shodu se záměrem hledání, titulek, perex, SEO title, meta description, slug, strukturu nadpisů, přirozené pokrytí klíčových témat, interní odkazy a čitelnost.
-- `geo_score` hodnotí přímé odpovědi, jednoznačné entity a kontext, faktickou přesnost a oporu ve zdrojích, samostatnou srozumitelnost sekcí, citovatelnost pro AI a praktickou využitelnost.
+- `geo_score` hodnotí přímé odpovědi, jednoznačné entity a kontext, faktickou přesnost, samostatnou srozumitelnost sekcí, citovatelnost pro AI, praktický postup v EuroGoPass a to, že čtenářský text nejmenuje oficiální weby.
 - `summary` je jedna krátká česká věta vystihující celkový stav a nejdůležitější prioritu. Je určena pro interní české rozhraní i při hodnocení cizojazyčné verze.
 - `seo_checks` a `geo_checks` obsahují vždy 3 až 6 konkrétních oblastí. Každá má krátký český název, vlastní skóre a jednu stručnou českou poznámku založenou na skutečném výsledku.
 - Varování a dílčí kontroly se musí promítnout do skóre. Výstup se závažným varováním nesmí získat neodůvodněně vysoké hodnocení.

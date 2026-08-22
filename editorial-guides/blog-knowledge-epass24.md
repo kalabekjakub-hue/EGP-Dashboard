@@ -22,7 +22,7 @@ Last updated: August 2026.
 | **Flux Libre** | France | French name for camera Free-Flow sections — OK in explanatory asides |
 | **SAPN / ALIAE / Sanef** | France | Operators on specific corridors — optional depth |
 | **AutoPASS** | Norway | Common local brand for electronic toll — OK when explaining Norway; product CTA stays **Free-Flow** |
-| **EPASS24** | NO / SE foreign-plate billing portal | Ops/fulfillment portal. Mention at most as “billing portals foreign drivers often use”; **never** as EuroGoPass product name |
+| **EPASS24** | NO / SE foreign-plate billing portal | Ops/fulfillment only. **Never** name it in customer-facing blog copy; EuroGoPass product is **Free-Flow** |
 | **Bompenge / toll station** | Norway | Local word for toll point — fine in travel tips |
 | **Transportstyrelsen** | Sweden | Authority for congestion tax rules — cite for rules, not for EuroGoPass prices |
 
@@ -36,19 +36,20 @@ Last updated: August 2026.
 | **DK** | Free motorways; paid Storebælt & Øresund bridges | No Free-Flow product; Øresund sold under SE when added |
 | **IT / PL / HR / …** | Toll gates / network-specific | Generally **no** Free-Flow product today — route tips |
 
-Always verify current sellable list against the live site if writing “we sell X in country Y.”
+Always verify current sellable list against the live site if writing “we sell X in country Y.” Do not write HGV / truck / GO-Box articles; EuroGoPass sells passenger and light vehicles up to 3.5 t.
 
 ## Do / Don’t for EPASS24 specifically
 
 **Do**
 
 - Explain that foreign plates in Norway/Sweden are often billed electronically after the trip.
-- Say EuroGoPass **handles Free-Flow for you** (estimate → save card → charge later + 10%).
+- Say EuroGoPass **handles Free-Flow for you** (estimate → save card → charge later + 10 %).
 - Stress the **monthly** settlement window for Nordic Free-Flow.
+- Keep official portal names out of the article. Facts go in as statements; source URLs stay in claims.
 
 **Don’t**
 
+- Name EPASS24, edalnice, eznamka or similar shops in the reader-facing text.
 - Title posts “EPASS24 vs EuroGoPass”.
 - Promise an EPASS24 account, tag, or app from us.
-- Confuse EPASS24 with Øresund prepaid tickets.
-- Use EPASS24 as a synonym for France Flux Libre.
+- Tell readers the facts come from an official website.

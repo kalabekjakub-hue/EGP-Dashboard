@@ -14,10 +14,10 @@ AI-asistovaná tvorba praktických SEO článků o cestování, dálničních zn
 
 ## Cíl článku
 
-- Praktický text (řádově jedna A4)
-- `target_characters` **500–12 000**, při generování CZ cíl **±10 %**; po třech opravách se text uloží i mimo rozsah
-- Organické představení EuroGoPass u konkrétních poplatků i v závěru
-- SEO + GEO dohledatelnost
+- Praktický SEO/GEO text s nákupní cestou v EuroGoPass
+- Výchozí `target_characters` **4 500** (povolený rozsah zadání **500–12 000**), při generování CZ cíl **±10 %**; po třech opravách se text uloží i mimo rozsah
+- EuroGoPass po každém pravidle jako další krok, ne jen v závěru
+- Oficiální weby jen v rešerši a `claims`; čtenář je v článku nevidí ani jako zdroj
 
 ## Workflow
 
@@ -75,7 +75,7 @@ Autosave nezasahuje do čísla verze. **Uložit verzi** zvyšuje lokální reviz
 
 ### Editovatelné guides (`blog_editorial_guides` / seed `editorial-guides/`)
 
-Hlavní: `editor-prompt.md`. Doladění: styl, struktura, brand, rules. Max 20 000 znaků, název končí `.md`.
+Hlavní: `editor-prompt.md`. Katalog a vozidla: `eurogopass.md`. Doladění: styl, struktura, brand, rules. Max 20 000 znaků, název končí `.md`.
 
 ### Interní odkazy (přesné HTTPS na `eurogopass.com`)
 
@@ -98,7 +98,7 @@ Locale musí sedět s jazykovou verzí; kotva popisná. Holé URL a vymyšlené 
 - Audit v `blog_seo_audits`: poradní skóre 0–100 — **neblokuje publikaci**
 - `seo-refresh`: nový výběr záměrů, draft, run `rewrite`, audit; musí zachovat podstatu textu
 
-**Clustering:** cena / nákup / kontrola / délky platnosti stejného produktu v jedné zemi → standardně podsekce jednoho článku. Řazení kandidátů deterministické. Po použití (návrh / článek / publikace) priorita výrazu rapidně klesne. Stejné primární slovo, silný překryv clusteru nebo skoro stejný titulek se nesmí navrhnout znovu.
+**Clustering:** cena / nákup / kontrola / délky platnosti stejného produktu v jedné zemi → standardně podsekce jednoho článku. Řazení kandidátů deterministické, s předností výrazů z nabídky EuroGoPass. Destinace bez produktu (Itálie, Bosna, Řecko) smí být jen kontext trasy; výchozí `productFocus` u `POST /topics/suggest` to vynucuje. Nákladní mýto, GO-Box a neprodávané systémy jsou `out_of_scope` vždy a nesmí být hlavní téma. Po použití (návrh / článek / publikace) priorita výrazu rapidně klesne. Stejné primární slovo, silný překryv clusteru nebo skoro stejný titulek se nesmí navrhnout znovu.
 
 ## Automatizace (worker)
 

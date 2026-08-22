@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { articleLengthPrompt, articleLengthRange, articleLengthRepairSafety, articleLengthStatus, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, isDuplicateEditorialTopic, keywordClustersContract, keywordOpportunityScore, keywordPoolView, keywordRows, keywordSelectionChanged, keywordSetOverlap, keywordUsagePenalty, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, promoteUnusedPrimary, requestedArticleLength, sanitizeCustomerFacingLinks, seoContentHash, seoGeoContract, seoRefreshSafety, topicTitleSimilarity, trimArticleToLengthRange, writingStylesContract } from "./editorial-api";
+import { articleLengthPrompt, articleLengthRange, articleLengthRepairSafety, articleLengthStatus, catalogEditorialGuideFilename, customerFacingOfficialMentions, deterministicInternalLinkWarnings, deterministicSeoGeoWarnings, editorialContentChanged, editorialProductFocus, fallbackSeoGeoReport, internalLinkContext, internalLinksContract, isDuplicateEditorialTopic, keywordClustersContract, keywordOpportunityScore, keywordPoolView, keywordRows, keywordSelectionChanged, keywordSetOverlap, keywordUsagePenalty, languagesNeedSync, localesNeedingSync, markdownLinks, nextLocalRevision, normalizeKeyword, orderEditorialGuides, parseDelimitedRows, primaryEditorialGuideFilename, promoteUnusedPrimary, requestedArticleLength, sanitizeCustomerFacingLinks, seoContentHash, seoGeoContract, seoRefreshSafety, topicIsOutOfCatalog, topicMatchesProductFocus, topicTitleSimilarity, trimArticleToLengthRange, writingStylesContract } from "./editorial-api";
 
 test("normalizes keyword whitespace and case without losing language characters", () => {
   assert.equal(normalizeKeyword("  Dálniční   Známka ČR  "), "dálniční známka čr");
@@ -50,24 +50,30 @@ test("loads the shared SEO/GEO contract for every AI stage", () => {
   assert.match(internalLinksContract, /lokaliz/i);
   assert.match(internalLinksContract, /claims\.source_urls/);
   assert.match(internalLinksContract, /eurogopass\.com/);
+  assert.match(internalLinksContract, /oficiálního webu/);
+  assert.match(seoGeoContract, /nákupní nebo plánovací krok/);
   assert.match(writingStylesContract, /balanced/);
   assert.match(writingStylesContract, /factual/);
   assert.match(writingStylesContract, /roadmate/);
   assert.match(writingStylesContract, /Faktická přesnost je ve všech profilech stejná/i);
   assert.match(writingStylesContract, /Markdown podklad/i);
   assert.equal(primaryEditorialGuideFilename, "editor-prompt.md");
+  assert.equal(catalogEditorialGuideFilename, "eurogopass.md");
   assert.match(keywordClustersContract, /Nejdříve cluster, potom téma/i);
   assert.match(keywordClustersContract, /jeden den, deset dní, měsíc, dva měsíce nebo rok/i);
   assert.match(keywordClustersContract, /Priorita a rozmanitost/i);
+  assert.match(keywordClustersContract, /produkt z katalogu EuroGoPass/i);
+  assert.match(keywordClustersContract, /nákladních autech/i);
 });
 
-test("editorial guides put editor-prompt.md first as the main prompt", () => {
+test("editorial guides put editor-prompt.md first and eurogopass.md second", () => {
   const ordered = orderEditorialGuides([
     { filename: "writing-style.md" },
     { filename: "Editor-Prompt.md" },
     { filename: "brand-context.md" },
+    { filename: "eurogopass.md" },
   ]);
-  assert.deepEqual(ordered.map(row => row.filename), ["Editor-Prompt.md", "brand-context.md", "writing-style.md"]);
+  assert.deepEqual(ordered.map(row => row.filename), ["Editor-Prompt.md", "eurogopass.md", "brand-context.md", "writing-style.md"]);
 });
 
 test("keyword opportunity score is stable and does not use random ordering", () => {
@@ -124,6 +130,45 @@ test("unused keyword in a mixed selection becomes the primary intent", () => {
     { id: "fresh", query: "slovenská známka", normalized_query: "slovenská známka", source: "manual" as const, suggested_count: 0 },
   ];
   assert.deepEqual(promoteUnusedPrimary(["used", "fresh"], candidates), ["fresh", "used"]);
+});
+
+test("product focus keeps destination queries as context and sellable countries as primary", () => {
+  assert.equal(editorialProductFocus("rakouská dálniční známka"), "sellable");
+  assert.equal(editorialProductFocus("france free-flow"), "sellable");
+  assert.equal(editorialProductFocus("cesta do Itálie rakouská známka"), "sellable");
+  assert.equal(editorialProductFocus("digitální známka"), "sellable");
+  assert.equal(editorialProductFocus("rakouská známka do 3,5 t"), "sellable");
+  assert.equal(editorialProductFocus("most v Řecku"), "context");
+  assert.equal(editorialProductFocus("italská města"), "context");
+  assert.equal(editorialProductFocus("Bosna a Hercegovina dálnice"), "context");
+  assert.equal(topicMatchesProductFocus("Rakouská známka na cestě do Itálie", "cesta do itálie"), true);
+  assert.equal(topicMatchesProductFocus("Mosty v Řecku, které stojí za vidění", "most v řecku"), false);
+});
+
+test("catalog scope rejects trucks and other systems EuroGoPass does not sell", () => {
+  assert.equal(editorialProductFocus("rakouské mýto pro nákladní auta"), "out_of_scope");
+  assert.equal(editorialProductFocus("GO-Box Rakousko"), "out_of_scope");
+  assert.equal(editorialProductFocus("HU-GO maďarské mýto"), "out_of_scope");
+  assert.equal(editorialProductFocus("LKW Maut Austria"), "out_of_scope");
+  assert.equal(editorialProductFocus("Umweltplakette Německo"), "out_of_scope");
+  assert.equal(editorialProductFocus("ekologická plaketa"), "out_of_scope");
+  assert.equal(topicIsOutOfCatalog("Mýto pro kamiony v Rakousku", "nakladni myto rakousko"), true);
+  assert.equal(topicMatchesProductFocus("Mýto pro kamiony v Rakousku", "rakouské mýto nákladní"), false);
+  assert.equal(topicIsOutOfCatalog("Rakouská dálniční známka", "rakouská známka"), false);
+});
+
+test("product-focus ranking prefers a sellable query over a high-volume destination", () => {
+  const now = new Date("2026-07-20T12:00:00.000Z").getTime();
+  const shared = { normalized_query: "", source: "search_console" as const, clicks: 0, ctr: 0, suggested_count: 0, generated_count: 0, published_count: 0, last_imported_at: "2026-07-20T10:45:30.000Z", position: 20 };
+  const italy = { ...shared, id: "it", query: "cesta do itálie", normalized_query: "cesta do itálie", impressions: 800 };
+  const austria = { ...shared, id: "at", query: "rakouská dálniční známka", normalized_query: "rakouská dálniční známka", impressions: 40 };
+  const truck = { ...shared, id: "hgv", query: "rakouské mýto nákladní auta", normalized_query: "rakouské mýto nákladní auta", impressions: 900 };
+  const ranked = keywordPoolView([italy, truck, austria], now);
+  assert.equal(ranked[0].id, "at");
+  assert.equal(ranked[1].id, "it");
+  assert.equal(ranked[2].id, "hgv");
+  assert.deepEqual(promoteUnusedPrimary(["it", "at"], [italy, austria], true), ["at", "it"]);
+  assert.deepEqual(promoteUnusedPrimary(["hgv", "at"], [truck, austria], true), ["at", "hgv"]);
 });
 
 test("article target of 4500 characters allows only a ten percent deviation", () => {
@@ -337,4 +382,21 @@ test("internal-link audit rejects leftover official website links", () => {
   const body = (`Praktické informace jsou na [oficiálním portálu](https://edalnice.gov.cz). [Naplánujte trasu přes EuroGoPass](https://eurogopass.com/cs#home-hero) a [Česko v EuroGoPass](https://eurogopass.com/cs/coverage/cz). `).repeat(3);
   const warnings = deterministicInternalLinkWarnings({ body_md: body }, "cs", ["CZ"]);
   assert.ok(warnings.some(warning => warning.location === "Odkazy"));
+});
+
+test("internal-link catalog without countries lists only sellable coverage pages", () => {
+  const context = internalLinkContext("cs");
+  assert.match(context, /https:\/\/eurogopass\.com\/cs\/coverage\/cz/);
+  assert.match(context, /https:\/\/eurogopass\.com\/cs\/coverage\/at/);
+  assert.doesNotMatch(context, /\/cs\/coverage\/it/);
+  assert.doesNotMatch(context, /\/cs\/coverage\/ba/);
+});
+
+test("rejects official portal names and source attribution in reader-facing copy", () => {
+  const withPortal = (`Česko: desetidenní známka na edalnice. [Naplánujte trasu přes EuroGoPass](https://eurogopass.com/cs#home-hero) a [Česko v EuroGoPass](https://eurogopass.com/cs/coverage/cz). `).repeat(3);
+  const withPhrase = (`Známku koupíte na oficiálním webu. [Naplánujte trasu přes EuroGoPass](https://eurogopass.com/cs#home-hero) a [Česko v EuroGoPass](https://eurogopass.com/cs/coverage/cz). `).repeat(3);
+  assert.ok(deterministicInternalLinkWarnings({ body_md: withPortal }, "cs", ["CZ"]).some(warning => warning.location === "Oficiální weby"));
+  assert.ok(deterministicInternalLinkWarnings({ body_md: withPhrase }, "cs", ["CZ"]).some(warning => warning.location === "Oficiální weby"));
+  assert.deepEqual(customerFacingOfficialMentions("Roční známka stojí 2300 Kč. V EuroGoPass ji koupíte v plánovači."), []);
+  assert.ok(customerFacingOfficialMentions("Cenu ověřte na oficiálním webu.").length);
 });

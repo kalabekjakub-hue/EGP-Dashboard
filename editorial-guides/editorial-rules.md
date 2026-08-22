@@ -17,14 +17,14 @@ Pro nabídku, cenu a podmínky EuroGoPass používej aktuální produktová data
 
 Blogy, diskuse, sociální sítě a automaticky vytvořené přehledy nejsou dostatečným zdrojem pro cenu, platnost, pokutu ani zákonnou povinnost.
 
-Použití oficiálního státního webu jako interního zdroje neznamená, že ho má článek ukazovat čtenáři. U známek, mostů a Free-Flow FR/NO/SE je další krok vždy plánovač EuroGoPass. Do `body_md` nevkládej odkaz, holou URL ani závorku s oficiální doménou. URL zdroje patří jen do claims.
+Použití oficiálního státního webu jako interního zdroje neznamená, že ho má článek ukazovat čtenáři nebo jmenovat. U známek, mostů a Free-Flow FR/NO/SE je další krok vždy plánovač EuroGoPass. Do `body_md` nevkládej odkaz, holou URL, závorku s oficiální doménou, název portálu ani větu, že fakt pochází z oficiálního webu. URL zdroje patří jen do claims.
 
 ## Co musí být aktuálně ověřeno
 
 Před vložením do článku ověř zejména:
 
-- zda dané vozidlo potřebuje známku nebo mýto;
-- kategorizaci podle hmotnosti, náprav, výšky či typu vozidla;
+- zda dané **osobní nebo lehké** vozidlo do 3,5 t potřebuje známku, most nebo Free-Flow;
+- že informace platí pro kategorii, kterou EuroGoPass prodává — ne pro kamiony;
 - cenu, měnu a délku platnosti;
 - začátek platnosti a případnou ochrannou či čekací lhůtu;
 - povinnosti pro motocykl, přívěs, karavan a obytné vozidlo;
@@ -34,7 +34,7 @@ Před vložením do článku ověř zejména:
 - výši pokuty nebo jiného postihu;
 - dostupnost konkrétního produktu přes EuroGoPass.
 
-Když článek popisuje zemi nebo trasu, nesmí skončit jen výčtem pravidel. U produktů, které EuroGoPass prodává (známky, mosty, Free-Flow FR/NO/SE, Øresund), musí být jasné, jak to čtenář vyřídí u nás. Kamerové mýto nazývej **Free-Flow**, ne EPASS24. Coverage stránka nesmí sama zakázat nákup, který už je v nabídce. Nevymýšlej ceny Free-Flow. Plus nepřenášej na odložené kamerové mýto. Aplikaci nezmiňuj.
+Když článek popisuje zemi nebo trasu, nesmí skončit jen výčtem pravidel. Po vysvětlení pravidla nabídni coverage stránku země a nákup nebo naplánování trasy v EuroGoPass. Kamerové mýto nazývej **Free-Flow**, ne názvem cizího portálu. Coverage stránka nesmí sama zakázat nákup, který už je v nabídce. Nevymýšlej ceny Free-Flow. Plus nepřenášej na odložené kamerové mýto. Aplikaci nezmiňuj. Hlavní článek drž u produktu, který EuroGoPass prodává osobním a lehkým vozidlům; Itálie, Bosna, Řecko, cizí most, kamion nebo GO-Box smí být jen kontext, nikoli téma. Katalog je v `eurogopass.md`.
 
 Ukládej přímou adresu konkrétního zdroje a datum kontroly, pokud to datový model dovoluje. Letopočet v názvu článku nepovažuj za důkaz aktuálnosti.
 
@@ -42,7 +42,7 @@ Ukládej přímou adresu konkrétního zdroje a datum kontroly, pokud to datový
 
 - Každé důležité tvrzení musí být užší nebo stejně široké jako důkaz ve zdroji.
 - Nezobecňuj pravidlo jednoho úseku na celou zemi.
-- Nezobecňuj pravidlo pro osobní vůz na všechna vozidla.
+- Nezobecňuj pravidlo pro osobní vůz na nákladní auta a naopak. Článek piš pro osobní / lehké vozidlo; hranici 3,5 t zmín jednou a nákladní systém nepopisuj.
 - Vždy rozlišuj datum nákupu, začátek platnosti a dobu platnosti.
 - U ceny uveď, zda jde o státní cenu, celkovou cenu nebo cenu včetně služby, pokud je toto rozlišení pro čtenáře podstatné.
 - Pokutu neuváděj bez aktuálního oficiálního zdroje a jasných podmínek.
@@ -80,7 +80,8 @@ Překlad je lokalizace stejné ověřené verze, nikoli nový článek. Proto:
 Před publikací musí být možné odpovědět ano na všechny relevantní otázky:
 
 - Odpovídá úvod přímo na titulek?
-- Je jasné, pro jakou trasu, vozidlo a období informace platí?
+- Je jasné, pro jakou trasu, osobní/lehké vozidlo a období informace platí?
+- Není hlavní téma nákladní auto, GO-Box, ekologická plaketa nebo země bez produktu EuroGoPass?
 - Jsou známka, mýto a zvláštní poplatky správně rozlišeny?
 - Má každý proměnlivý klíčový údaj aktuální přímý zdroj?
 - Neobsahuje text nepodložený slib nebo produktovou vlastnost?

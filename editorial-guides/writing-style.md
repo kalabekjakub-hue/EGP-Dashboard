@@ -12,16 +12,19 @@ Buď faktický: konkrétní podmínky, relevantní výjimky a jasný další kro
 
 ## Jak silně tlačit EuroGoPass
 
-EuroGoPass má být v článku přirozeně přítomný jako praktické řešení, ne jen krátká zmínka na konci. Tlač službu co nejvíc, ale pořád lidsky: čtenář má mít pocit rady před cestou, ne letáku.
+EuroGoPass má být v článku praktické řešení, ne leták a ne jedna věta na konci. Nejdřív fakt, hned potom nákup nebo plánování u nás.
 
-- Už v úvodu nebo brzy v praktické části řekni, že čtenář může potřebné poplatky ověřit a často i koupit na jednom místě v EuroGoPass.
-- V praktickém postupu ukazuj EuroGoPass jako výchozí cestu: zadat trasu, vidět známky, mosty, tunely i mýto, koupit dostupné produkty najednou.
-- Když země má víc způsobů platby, každý pojmenuj a hned ho napoj na EuroGoPass, pokud produkt opravdu nabízíme. Příklad: v Rakousku je dálniční známka a zvlášť se platí vybrané mosty nebo úseky; u obojího řekni, co si čtenář vyřídí u nás.
-- U Free-Flow vysvětli rozdíl oproti známce i branám: odhad v pokladně, karta uložená, stržení až po jízdě + 10 %. U Norska a Švédska měsíční okno, u Francie kratší okno po jízdě.
-- EPASS24, AutoPASS a Flux Libre zmiň nanejvýš jednou jako místní žargon. Produkt a CTA jsou **Free-Flow**.
-- V závěru dej jasnou výzvu k akci přes EuroGoPass — ověřit trasu, zkontrolovat produkty nebo dokončit nákup.
+- Nejdřív odpověz na pravidlo země nebo úseku. Hned potom ukaž další krok v EuroGoPass.
+- U konkrétní země odkaž na její coverage stránku, když je v povoleném seznamu: pravidla Česka pohromadě jsou v EuroGoPass.
+- Slovo EuroGoPass smí být klikací a vést do plánovače. Druhá možnost je věta typu „celou trasu si naplánujete v EuroGoPass“.
+- Nekupujte čtenáře po každé větě. Nepoužívej falešnou slevu, vykřičníky ani „musíte to koupit ihned“.
+- V praktickém postupu ukazuj EuroGoPass jako cestu: zadat trasu, vidět známky, mosty i mýto, koupit dostupné položky najednou.
+- Když země má víc způsobů platby, každý pojmenuj. Příklad: v Rakousku je známka a zvlášť se platí vybrané mosty; u obojího stačí říct, co to je, a odkázat na coverage nebo plánovač.
+- U Free-Flow vysvětli rozdíl oproti známce i branám a jak to koupíte v EuroGoPass: odhad v pokladně, karta uložená, stržení až po jízdě + 10 %. U Norska a Švédska měsíční okno, u Francie kratší okno po jízdě.
+- Billingové portály a státní e-shopy v textu nepojmenovávej. Produkt a CTA jsou **Free-Flow** a EuroGoPass.
+- V závěru zopakuj: ověřit zemi na coverage, nebo naplánovat celou cestu v EuroGoPass.
 - EuroGoPass Plus zmiň jen u známek (změna SPZ, datum, storno). Netvrď stejné Plus u Free-Flow. Aplikaci nezmiňuj.
-- Opakuj značku střídmě, ale sebevědomě. Lepší jsou 2–4 konkrétní užitečné zmínky než jedna slabá věta na konci.
+- Opakuj značku tam, kde je další krok. V delším článku počítej se 3–5 užitečnými zmínkami, ne s jednou na konci.
 
 Název značky vždy zapisuj jako **EuroGoPass**.
 
@@ -42,12 +45,14 @@ Název značky vždy zapisuj jako **EuroGoPass**.
 - klišé typu „cestování nebylo nikdy jednodušší“;
 - přehnaná slova jako „revoluční“, „bezkonkurenční“ nebo „stoprocentně bez starostí“;
 - falešnou naléhavost, nátlak a vykřičníky v běžném textu;
-- odkazy, holé URL i závorky s oficiálními weby (edalnice.gov.cz, eznamka.sk, nemzetiutdij.hu, EPASS24 a podobně);
-- aktivní doporučení nákupu na státních webech jako alternativy k EuroGoPass;
+- odkazy, holé URL, závorky i holé názvy oficiálních webů (edalnice, eznamka, nemzetiutdij, EPASS24 a podobně);
+- věty, že informace pochází z oficiálního nebo státního webu;
+- aktivní doporučení nákupu nebo ověření na státních webech jako alternativy k EuroGoPass;
 - označení EuroGoPass jako oficiálního webu, portálu nebo státního prodejce;
 - neověřené sliby o ceně, rychlosti, pokrytí nebo absenci pokuty;
 - fiktivní zkušenosti zákazníků, citace a statistiky;
-- titulky a CTA typu „koupit EPASS24“ nebo „francouzská známka“;
+- titulky a CTA typu „koupit EPASS24“, „francouzská známka“ nebo „mýto pro kamiony“;
+- návody na GO-Box, HU-GO, Toll Collect nebo ekologickou plaketu;
 - mobilní aplikaci EuroGoPass;
 - výplň jen kvůli délce a závěry, které jen převyprávějí článek.
 

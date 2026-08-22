@@ -5,19 +5,19 @@ Tento dokument je závazný pro tvorbu článku, lokalizaci, průběžnou optima
 ## Povinný formát
 
 - Odkazy v `body_md` zapisuj jako standardní Markdown: `[přirozený popis cíle](https://eurogopass.com/...)`.
-- Samotná URL bez popisného textu není dostačující. Kotva musí čtenáři před kliknutím říct, kam vede, například „informace o dálničních poplatcích v Česku“ nebo „naplánovat trasu přes EuroGoPass“.
+- Samotná URL bez popisného textu není dostačující. Kotva musí čtenáři před kliknutím říct, kam vede. Pro zemi použij popis jako „poplatky v Česku“. Pro plánovač stačí „naplánovat trasu v EuroGoPass“ nebo samotné slovo **EuroGoPass**.
 - Nepoužívej neurčitou kotvu typu „zde“, „tady“ nebo „klikněte sem“ samostatně. Výzva ke kliknutí může být ve větě, ale odkazovaná část musí být popisná.
 - Nevymýšlej cestu, slug, parametr, fragment ani doménu. Použij pouze přesné adresy předané v části „Povolené interní odkazy“ konkrétního promptu.
 
 ## Přirozená četnost a umístění
 
 - V běžném článku použij zpravidla 2 až 4 interní odkazy EuroGoPass podle délky a počtu zemí. Neopakuj stejný cíl vícekrát bez skutečné potřeby.
-- EuroGoPass přirozeně zmiň nejméně jednou v praktické části u konkrétního poplatku a jednou v závěrečném dalším kroku, pokud to délka článku dovolí.
-- Když článek vysvětluje známku, mýto, most, tunel nebo Free-Flow, hned u daného poplatku řekni, co s ním čtenář může udělat v EuroGoPass. Nevytvářej z toho samostatný reklamní blok.
+- Po vysvětlení pravidla ihned nabídni další krok v EuroGoPass. U země použij coverage stránku. U celé cesty a nákupu použij plánovač.
+- Slovo EuroGoPass smí být klikací a vést na plánovač. Coverage odkaz ať popisuje zemi nebo poplatky, ne značku.
 - Alespoň jeden odkaz má vést přímo do plánovače trasy. Pokud článek řeší konkrétní zemi a její coverage stránka je v povoleném seznamu, použij ji. Pokud v seznamu není, nevymýšlej ji a zůstaň u plánovače.
 - Když článek zmiňuje EuroGoPass Plus, odkazuj na lokalizovanou stránku Plus. Plus není povinný odkaz v každém článku.
-- Odkaz vlož do věty, která logicky navazuje na právě vysvětlený problém. Nevytvářej reklamní blok uprostřed nesouvisející faktické pasáže.
-- Značku nevkládej do titulku, SEO title ani každého nadpisu jen kvůli četnosti. Nepoužívej nátlak, umělou naléhavost, neověřenou úsporu ani slib, který EuroGoPass nemá doložený.
+- Odkaz vlož do věty, která navazuje na právě vysvětlený problém. Čtenář má kliknout k nám, ne na státní portál. Nevytvářej výzvu „kupte ihned“ ani falešnou slevu.
+- Značku nevkládej do každého nadpisu jen kvůli četnosti. V perexu nebo závěru ji použij, když je dalším praktickým krokem. Nepoužívej nátlak, umělou naléhavost, neověřenou úsporu ani slib, který EuroGoPass nemá doložený.
 
 ## Lokalizace
 
@@ -29,8 +29,9 @@ Tento dokument je závazný pro tvorbu článku, lokalizaci, průběžnou optima
 ## Externí odkazy
 
 - V `body_md`, perexu, titulku i SEO polích smí být klikací odkaz, holá URL i závorka s doménou **pouze** na `https://eurogopass.com/...`.
-- Oficiální státní weby, provozovatele mýta a e-shopy známek (edalnice, eznamka, nemzetiutdij, ASFINAG, EPASS24, AutoPASS, Sanef, ALIAE, SAPN a další) **do zákaznického textu nevkládej**. Ani jako Markdown odkaz, ani jako `(edalnice.gov.cz)`.
-- Přesné URL oficiálních zdrojů patří výhradně do `claims.source_urls` pro interní ověření. Čtenář je v článku nesmí vidět.
+- Oficiální státní weby, provozovatele mýta a e-shopy známek (edalnice, eznamka, nemzetiutdij, ASFINAG, EPASS24, AutoPASS, Sanef, ALIAE, SAPN a další) **do zákaznického textu nevkládej**. Ani jako Markdown odkaz, ani jako `(edalnice.gov.cz)`, ani jako holý název portálu.
+- Nepiš, že údaj platí „podle oficiálního webu“, „na státním portálu“ nebo že ho čtenář má ověřit jinde než v EuroGoPass.
+- Přesné URL oficiálních zdrojů patří výhradně do `claims.source_urls` pro interní ověření. Čtenář je v článku nesmí vidět ani tušit jako alternativu nákupu.
 - Nevymýšlej externí URL. Interní odkaz EuroGoPass nesmí být vydáván za oficiální státní zdroj.
 - Další krok čtenáře je vždy plánovač nebo stránka země na eurogopass.com, nikdy registrace nebo nákup na státním portálu.
 

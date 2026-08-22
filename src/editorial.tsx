@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertTriangle, Bold, Check, ChevronDown, FileText, ImagePlus, Italic, List, LoaderCircle, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Bold, Check, ChevronDown, FileText, ImagePlus, Italic, List, LoaderCircle, ShoppingBag, Sparkles, X } from "lucide-react";
 import { languagesNeedSync, localesNeedingSync } from "./editorial-versioning";
 
 type EditorialDraft = {
@@ -156,9 +156,10 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
   const [keywordState, setKeywordState] = useState<"ready" | "saving" | "error">("ready"); const [keywordSetupRequired, setKeywordSetupRequired] = useState(false);
   const [automation, setAutomation] = useState<Pick<EditorialSettings, "enabled" | "generation_hour">>({ enabled: false, generation_hour: 7 });
   const [openedAt] = useState(() => new Date());
-  const [topicInput, setTopicInput] = useState(""); const [characters, setCharacters] = useState(2200);
+  const [topicInput, setTopicInput] = useState(""); const [characters, setCharacters] = useState(4500);
   const [state, setState] = useState<"loading" | "ready" | "saving" | "error">("loading"); const [queueing, setQueueing] = useState<Set<string>>(() => new Set()); const [message, setMessage] = useState("");
   const [suggesting, setSuggesting] = useState(false);
+  const [productFocus, setProductFocus] = useState(true);
   const [selectedTopic, setSelectedTopic] = useState("");
   const [styleTopic, setStyleTopic] = useState<EditorialTopic | null>(null); const [selectedStyle, setSelectedStyle] = useState<WritingStyle>("balanced");
   const [showAllArticles, setShowAllArticles] = useState(false);
@@ -186,7 +187,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
     catch (error) { setMessage(error instanceof Error ? error.message : "Generování selhalo"); await load(); }
     finally { setQueueing(current => { const next = new Set(current); next.delete(topic.id); return next; }); }
   };
-  const suggestTopic = async () => { setSuggesting(true); setMessage(""); try { const response = await fetch("/api/editorial/topics/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targetCharacters: characters }) }); const payload = await response.json() as { topic?: EditorialTopic; error?: string }; if (!response.ok || !payload.topic) throw new Error(payload.error); setTopics(current => [...current, payload.topic!]); } catch (error) { setMessage(error instanceof Error ? error.message : "Návrh tématu selhal"); } finally { setSuggesting(false); } };
+  const suggestTopic = async () => { setSuggesting(true); setMessage(""); try { const response = await fetch("/api/editorial/topics/suggest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targetCharacters: characters, productFocus }) }); const payload = await response.json() as { topic?: EditorialTopic; error?: string }; if (!response.ok || !payload.topic) throw new Error(payload.error); setTopics(current => [...current, payload.topic!]); } catch (error) { setMessage(error instanceof Error ? error.message : "Návrh tématu selhal"); } finally { setSuggesting(false); } };
   const importKeywords = async (content: string, mode: "csv" | "manual", filename = "") => { if (!content.trim()) return; setKeywordState("saving"); setMessage(""); try { const response = await fetch("/api/editorial/keywords/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content, mode, filename }) }); const payload = await response.json() as { imported?: number; error?: string }; if (!response.ok) throw new Error(payload.error); setManualKeywords(""); await load(); setKeywordState("ready"); } catch (error) { setKeywordState("error"); setMessage(error instanceof Error ? error.message : "Klíčová slova se nepodařilo importovat"); } };
   const uploadKeywordCsv = async (file?: File) => { if (!file) return; if (!file.name.toLowerCase().endsWith(".csv")) { setMessage("Nahraj CSV export z Google Search Console."); return; } await importKeywords(await file.text(), "csv", file.name); };
   const deleteTopic = async (topic: EditorialTopic) => { setMessage(""); try { const response = await fetch(`/api/editorial/topics/${topic.id}`, { method: "DELETE" }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error); setSelectedTopic(""); setStyleTopic(current => current?.id === topic.id ? null : current); setTopics(current => current.filter(item => item.id !== topic.id)); } catch (error) { setMessage(error instanceof Error ? error.message : "Téma se nepodařilo smazat"); } };
@@ -197,6 +198,7 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
     <form className="editorial-topic-bar surface" onSubmit={event => void addTopics(event)}>
       <textarea value={topicInput} onChange={event => setTopicInput(event.target.value)} placeholder="Napiš téma článku. Více témat můžeš vložit každé na nový řádek…" />
       <label className="editorial-length"><input aria-label="Počet znaků" title="Počet znaků" type="number" min={500} max={12000} step={100} value={characters} onChange={event => setCharacters(Number(event.target.value))} /></label>
+      <button type="button" className={productFocus ? "product-focus on" : "product-focus"} aria-label="Jen nabídka EuroGoPass" aria-pressed={productFocus} title="Hlavní téma jen z nabídky EuroGoPass pro osobní auta. Destinace bez produktu smí být jen kontext. Nákladní mýto a neprodávané systémy jsou zakázané vždy." onClick={() => setProductFocus(current => !current)}><ShoppingBag size={19} /></button>
       <button type="button" className="suggest" aria-label="Vytvořit téma pomocí AI" title="Vytvořit téma pomocí AI" disabled={suggesting} onClick={() => void suggestTopic()}><Sparkles className={suggesting ? "spin" : undefined} size={19} /></button>
       <button disabled={state === "saving" || !topicInput.trim()}>Přidat</button>
     </form>
@@ -245,40 +247,63 @@ export function EditorialHome({ back, openArticle }: { back: () => void; openArt
 const primaryGuideFilename = "editor-prompt.md";
 const defaultEditorPrompt = `# Hlavní prompt redaktora EuroGoPass
 
-Jsi redaktor EuroGoPass. Připravuješ praktické články o cestování autem, dálničních známkách a mýtném pro běžné evropské řidiče.
+Jsi redaktor EuroGoPass. Připravuješ praktické SEO/GEO články o cestování autem, dálničních známkách a mýtném. Každý článek má čtenáře dovést k EuroGoPass: ověřit trasu, pochopit poplatek a dostupné položky koupit u nás.
 
 ## Tvůj úkol
 
-- Odpověz přímo na otázku čtenáře, potom vysvětli podmínky a výjimky.
-- Ověřuj proměnlivá fakta z aktuálních důvěryhodných zdrojů. Nic nevymýšlej.
+- Odpověz přímo na otázku čtenáře, potom vysvětli podmínky, výjimky a nákup v EuroGoPass.
+- Proměnlivá fakta ověř z aktuálních důvěryhodných zdrojů, včetně státních portálů. Nic nevymýšlej.
+- Ověřená fakta v článku uveď jako běžné informace. Neuvádej, odkud pocházejí. Nepiš „podle oficiálního webu“, „na státním portálu“ ani název cizího e-shopu.
 - Piš srozumitelně, konkrétně a bez výplně. Drž se zadaného počtu znaků.
-- Připrav text tak, aby čtenář věděl, co se týká jeho trasy nebo vozidla a co má udělat dál.
 - Drž se zvoleného stylového profilu (\`balanced\`, \`factual\` nebo \`roadmate\`) jako komunikačního odstínu.
-- Detailní hlas, strukturu, terminologii, co zmiňovat i nezmiňovat a roli EuroGoPass ber z ostatních aktivních redakčních Markdown podkladů.
+- Detailní hlas, strukturu, nabídku produktů a Free-Flow ber z ostatních aktivních redakčních Markdown podkladů.
 
-## EuroGoPass v každém článku
+## EuroGoPass je další krok, ne dovětek
 
-Článek nemá být encyklopedie země. Má čtenáře dovést k tomu, co si má připravit a kde to vyřídí.
+Článek není encyklopedie země. Po každém pravidle řekni, co má čtenář udělat v EuroGoPass.
 
-- Hned u tématu stručně řekni, co EuroGoPass je: služba, kde zadáte trasu, uvidíte potřebné známky, mýto i zvláštní poplatky a dostupné produkty koupíte najednou.
-- U každé relevantní země nebo úseku rozliš známku, most, tunel, úsekové mýto a Free-Flow. Hned u daného poplatku řekni, co s ním čtenář udělá v EuroGoPass.
-- Produkt kamerového mýta se jmenuje **Free-Flow**, ne EPASS24. Aplikaci nezmiňuj. Plus smíš zmínit u známek, ne jako stejnou službu u odloženého Free-Flow.
-- Coverage stránky můžou zaostávat. Nákup namiř do plánovače. Nevymýšlej chybějící stránku země a nevymýšlej ceny Free-Flow.
-- Do článku nedávej odkazy na oficiální weby (edalnice, eznamka, nemzetiutdij, EPASS24 a podobně). Čtenář kliká jen na eurogopass.com. Oficiální URL patří do claims.
+Povinná kostra:
+
+1. Přímá odpověď na hledaný záměr.
+2. Pravidlo země, trasy nebo úseku.
+3. Jak to funguje, když to řeší v EuroGoPass. Tuto sekci nevynechávej.
+4. Jen ty výjimky, které mění nákup nebo platnost.
+5. Konkrétní další krok: coverage stránka země a/nebo plánovač.
+
+Jak to napojit:
+
+- Cesta přes více zemí → zadejte trasu v plánovači EuroGoPass, uvidíte známky, mosty i Free-Flow a koupíte dostupné položky najednou.
+- Známka v jedné zemi → pravidlo, potom coverage stránka této země, nákup v EuroGoPass.
+- Free-Flow → nejdřív kamery a platba po jízdě, potom odhad v pokladně, uložená karta, oficiální dluh + 10 % až po jízdě.
+- Slovo **EuroGoPass** smí být odkazem na plánovač. Coverage kotva popisuje zemi nebo poplatky, ne „klikněte sem“.
+- Coverage = tato země. Plánovač = celá cesta. Nákup namiř do plánovače, pokud coverage zaostává.
+- Produkt kamerového mýta se jmenuje **Free-Flow**. Aplikaci nezmiňuj. Plus jen u známek, ne u odloženého Free-Flow.
+- EuroGoPass je zprostředkovatel nákupu, nikdy státní portál, oficiální vydavatel ani správce silnic.
+
+## Zákaz oficiálních webů ve čtenářském textu
+
+Rešerše na státních webech je povolená. Do \`body_md\`, perexu, titulku a SEO polí nepatří:
+
+- odkaz, holá URL ani závorka s cizí doménou;
+- názvy portálů a e-shopů (edalnice, eznamka, nemzetiutdij, EPASS24, ASFINAG a podobně);
+- výzva koupit, registrovat se nebo ověřit údaj „na oficiálním webu“;
+- věta, že informace pochází z oficiálního, státního nebo vládního webu.
+
+Čtenář kliká jen na eurogopass.com. Přesné URL zdrojů patří výhradně do \`claims.source_urls\`.
 
 ## Délka
 
-Hlavní text \`body_md\` musí padnout do zadaného počtu znaků včetně mezer, plus minus 10 %. Piš spíš ke středu až spodku rozsahu a maximum nepřekračuj. Výplň, historii a obecné úvody nepoužívej.
+Hlavní text \`body_md\` musí padnout do zadaného počtu znaků včetně mezer, plus minus 10 %. Piš spíš ke středu až spodku rozsahu a maximum nepřekračuj. Výplň, historii a obecné úvody nepoužívej. Prostor použij na pravidlo, nákup v EuroGoPass a konkrétní výjimky.
 
 ## Jak pracovat s podklady
 
-Tento dokument je hlavní redaktorský prompt. Ostatní aktivní Markdown soubory jsou doplňky pro doladění stylu, značky, struktury a faktických redakčních pravidel.
+Tento dokument je hlavní redaktorský prompt. Ostatní aktivní Markdown soubory ho doladí stylem, značkou, strukturou a produktovými fakty.
 
 Pokud se doplňky překrývají, preferuj konkrétnější praktickou instrukci. Pokud je instrukce v konfliktu s ověřeným faktem, jasností nebo bezpečnostními pravidly systému, má přednost fakt, jasnost a bezpečnost.
 
 ## Výsledek
 
-Vrácený článek musí být praktický, fakticky opatrný, dobře strukturovaný a připravený k redakční kontrole. SEO metadata a odkazy musí odpovídat skutečnému obsahu. EuroGoPass představuj jako užitečné řešení cesty, nikdy jako oficiální státní portál.`;
+Vrácený článek musí být praktický, fakticky ověřený, dobře strukturovaný pro SEO i citaci AI a připravený k redakční kontrole. Čtenář po něm ví, co platí a jak to vyřídit v EuroGoPass.`;
 
 function isPrimaryGuide(filename: string) {
   return filename.trim().toLowerCase() === primaryGuideFilename;
@@ -452,7 +477,7 @@ export function EditorialSettingsModal({ onClose }: { onClose: () => void }) {
                   <textarea value={guide.content} maxLength={20000} spellCheck={false} onChange={event => setGuides(current => current.map(item => item.id === guide.id ? { ...item, content: event.target.value } : item))} />
                   <small>{guide.content.length.toLocaleString("cs-CZ")} / 20 000 znaků</small>
                 </div>}
-              </article>)}</div> : <div className="editorial-guide-empty">Zatím žádné doplňky. Nahraj například writing-style.md, brand-context.md, article-structure.md nebo editorial-rules.md.</div>}
+              </article>)}</div> : <div className="editorial-guide-empty">Zatím žádné doplňky. Nahraj například eurogopass.md, writing-style.md, brand-context.md, article-structure.md nebo editorial-rules.md.</div>}
             </section>
           </>}
           {guideMessage && <div className="editorial-message error"><AlertTriangle size={17} />{guideMessage}</div>}

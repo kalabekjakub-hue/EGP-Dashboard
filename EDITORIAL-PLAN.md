@@ -6,7 +6,7 @@ Stav dokumentu: průběžný návrh vznikající při společném upřesňován�
 
 Do stávajícího interního dashboardu přidat redakci pro tvorbu krátkých praktických SEO článků o cestování, dálničních známkách a mýtném. Aplikace poběží na stávajícím solo VPS a použije stávající Supabase.
 
-Článek má být přibližně na jednu A4, výchozí cíl kolem 2 200 znaků včetně mezer s tolerancí přibližně 1 800–2 600 znaků. Má být praktický, informační, dobře dohledatelný běžnými i AI vyhledávači a na konci organicky představit EuroGoPass jako zjednodušení cesty.
+Článek má výchozí cíl 4 500 znaků včetně mezer s tolerancí přibližně 4 050–4 950 znaků. Má být praktický, informační, dobře dohledatelný běžnými i AI vyhledávači a po každém pravidle dovést čtenáře k nákupu nebo naplánování v EuroGoPass. Oficiální weby slouží jen k ověření faktů, do článku nepatří.
 
 ## Stávající data v Supabase
 
@@ -163,7 +163,7 @@ Faktický kontext a stylistické instrukce se mají spravovat odděleně. Zákla
 - přímá odpověď v úvodu;
 - krátké nadpisy, přehledy a případně stručné FAQ;
 - většina článku bez prodejních formulací;
-- poslední odstavec organicky vysvětlí, jak EuroGoPass řeší problém popsaný v článku;
+- po každém pravidle země nebo úseku článek ukáže, jak to vyřídit v EuroGoPass;
 - neutrální formulace s přímým oslovením, například „S EuroGoPass si můžete…“;
 - žádná neověřená superlativní nebo garanční tvrzení.
 

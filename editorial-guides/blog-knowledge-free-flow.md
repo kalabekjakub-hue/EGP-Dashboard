@@ -11,7 +11,7 @@ Last updated: August 2026.
 | Audience | Say this | Avoid as the product name |
 |---|---|---|
 | Blog / marketing / UI product | **Free-Flow** | EPASS24, AutoPASS, Flux Libre as the *product* title |
-| Explaining how Nordic/French tolls work | You may mention **cameras**, **plate billing**, and (once, as context) AutoPASS / EPASS24 / Flux Libre | Do not title the article “Buy EPASS24 on EuroGoPass” |
+| Explaining how Nordic/French tolls work | Cameras, plate billing, pay later via EuroGoPass | Do not name official billing portals in the article |
 | France | **France Free-Flow** or Free-Flow on French camera sections | “French vignette” (France has **no** national highway vignette) |
 | Norway / Sweden | **Norway Free-Flow** / **Sweden Free-Flow** | “Norwegian vignette” / “Swedish vignette” |
 
@@ -88,7 +88,7 @@ Sold together on one checkout: classic e-vignettes, section/bridge tolls where o
 2. Explain Free-Flow vs vignette vs barrier.
 3. Link to locale homepage / planner and relevant `/coverage/fr`, `/coverage/no`, `/coverage/se`, `/coverage/dk` when those pages are in the allowlist.
 4. “Plan your route on EuroGoPass to see whether Free-Flow is on your path.”
-5. Do not send readers to EPASS24, AutoPASS, Sanef, ALIAE or SAPN to register or pay when EuroGoPass sells Free-Flow.
+5. Do not name official portals or send readers there to register or pay when EuroGoPass sells Free-Flow. Put source URLs in claims only.
 
 ## Avoid
 

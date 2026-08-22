@@ -103,7 +103,7 @@ Handler v `editorial-api.ts`. Zápisy pouze do `blog_*` a bucketu `blog-hero-ima
 |--------|------|--------|
 | `GET` | `/api/editorial/topics` | Fronta |
 | `POST` | `/api/editorial/topics` | Ruční přidání |
-| `POST` | `/api/editorial/topics/suggest` | AI návrh (+ `targetCharacters` 500–12000) |
+| `POST` | `/api/editorial/topics/suggest` | AI návrh (+ `targetCharacters` 500–12000, volitelně `productFocus`) |
 | `DELETE` | `/api/editorial/topics/:id` | Jen řádek `blog_topic_queue` |
 | `POST` | `/api/editorial/topics/:id/generate` | Generování CZ (+ `style_profile`) |
 
