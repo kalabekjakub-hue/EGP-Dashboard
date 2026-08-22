@@ -1489,7 +1489,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const [noteState, setNoteState] = useState<"idle" | "saving" | "error">("idle");
   const [ackOpen, setAckOpen] = useState(false);
   const [ackState, setAckState] = useState<"idle" | "saving" | "error">("idle");
-  const [exportState, setExportState] = useState<"idle" | "bundle" | "error">("idle");
+  const [exportState, setExportState] = useState<"idle" | "bundle" | "summary" | "error">("idle");
 
   useEffect(() => { setExportState("idle"); }, [order.id]);
 
@@ -1660,17 +1660,17 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const hasNote = (itemId?: string) => Boolean(itemId && (noteTextForItem(itemId) || manualAudit.some(entry => entry.item_id === itemId && entry.note?.trim())));
   const noteTargetHasStored = Boolean(noteItemId && (itemNotes.some(note => note.item_id === noteItemId) || noteDrafts[noteItemId]));
 
-  const downloadBundle = async () => {
-    setExportState("bundle");
+  const downloadExport = async (kind: "bundle" | "summary") => {
+    setExportState(kind);
     try {
-      const response = await fetch(`/api/orders/bundle?orderId=${encodeURIComponent(order.id)}`);
+      const response = await fetch(`/api/orders/${kind}?orderId=${encodeURIComponent(order.id)}`);
       if (!response.ok) throw new Error();
       const blob = await response.blob();
       const href = URL.createObjectURL(blob);
       const link = document.createElement("a");
       const stamp = order.plate.replace(/\s+/g, "-") || order.id.slice(0, 8);
       link.href = href;
-      link.download = `${stamp}-${order.number || order.id.slice(0, 8)}.zip`;
+      link.download = `${stamp}-${order.number || order.id}.${kind === "bundle" ? "zip" : "pdf"}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1681,10 +1681,6 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
     }
   };
 
-  const openSummary = () => {
-    window.open(`/api/orders/summary?orderId=${encodeURIComponent(order.id)}`, "_blank", "noopener");
-  };
-
   return (
     <main className="page-shell">
       <BackButton onClick={back} />
@@ -1693,14 +1689,16 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
         <div className="hero-actions">
-          <button type="button" onClick={() => void downloadBundle()} disabled={exportState === "bundle"}>
+          <button type="button" onClick={() => void downloadExport("bundle")} disabled={exportState === "bundle" || exportState === "summary"}>
             <Download size={16} /> {exportState === "bundle" ? "Připravuji…" : "Stáhnout vše"}
           </button>
-          <button type="button" onClick={openSummary}><FileText size={16} /> PDF souhrn</button>
+          <button type="button" onClick={() => void downloadExport("summary")} disabled={exportState === "bundle" || exportState === "summary"}>
+            <FileText size={16} /> {exportState === "summary" ? "Připravuji…" : "PDF souhrn"}
+          </button>
           <button type="button" onClick={() => navigate("screenshots")}>Screenshoty</button>
           <button type="button" onClick={() => navigate("documents")}>Doklady</button>
           <button type="button" className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button>
-          {exportState === "error" && <span className="hero-export-error">Balíček se nepodařilo stáhnout. Zkus to znovu.</span>}
+          {exportState === "error" && <span className="hero-export-error">Soubor se nepodařilo stáhnout. Zkus to znovu.</span>}
         </div>
       </section>
       {order.plateCountryConflict === true && (

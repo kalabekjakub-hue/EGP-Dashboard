@@ -1,6 +1,15 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import JSZip from "jszip";
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
+
+const require = createRequire(import.meta.url);
+const pdfkitModule = require("pdfkit") as typeof import("pdfkit") & { default?: typeof import("pdfkit") };
+const PDFDocument = pdfkitModule.default ?? pdfkitModule;
+const fontRoot = dirname(require.resolve("dejavu-fonts-ttf/package.json"));
+const FONT_MONO = join(fontRoot, "ttf", "DejaVuSansMono.ttf");
+const FONT_MONO_BOLD = join(fontRoot, "ttf", "DejaVuSansMono-Bold.ttf");
 
 const statusLabels: Record<string, string> = {
   awaiting_payment: "Čeká na platbu",
@@ -32,6 +41,7 @@ type RawOrder = {
   vehicle_vin?: string;
   invoice_pdf_path?: string;
   last_error?: string;
+  plate_country_conflict?: boolean | null;
 };
 
 type RawItem = {
@@ -43,17 +53,21 @@ type RawItem = {
   end_date?: string;
   price_eur_minor: number;
   status: string;
+  created_at?: string;
   fulfilled_at?: string;
   failed_at?: string;
   last_error?: string;
   engine_submitted_at?: string;
   state_reference?: string;
   pdf_storage_path?: string;
+  plate_country_conflict?: boolean | null;
   fulfillment_screenshots_meta?: {
     bucket: string;
     storagePrefix: string;
     country: string;
     plate?: string;
+    success?: boolean;
+    uploadedAt?: string;
     steps: Array<{ index: number; name: string; file: string }>;
   } | null;
   toll_id?: string;
@@ -72,6 +86,42 @@ type OfficialDocument = {
   document_type: string;
 };
 
+type ItemNote = {
+  item_id: string;
+  item_source?: string;
+  country_code?: string;
+  actor_email?: string;
+  body: string;
+  created_at: string;
+};
+
+type ConflictAck = {
+  actor_email?: string;
+  previous_value?: boolean | null;
+  created_at: string;
+};
+
+type ManualAudit = {
+  item_id: string;
+  item_source?: string;
+  country_code?: string;
+  actor_email?: string;
+  previous_status?: string;
+  note?: string;
+  created_at: string;
+};
+
+type OrderBundle = {
+  url: string;
+  key: string;
+  order: RawOrder;
+  items: RawItem[];
+  official: OfficialDocument[];
+  notes: ItemNote[];
+  acks: ConflictAck[];
+  audits: ManualAudit[];
+};
+
 function loadWorkerEnv() {
   const config = loadServerConfig();
   return { url: config.supabaseUrl, key: config.supabaseServiceKey };
@@ -81,12 +131,23 @@ function supabaseHeaders(key: string) {
   return { apikey: key, Authorization: `Bearer ${key}` };
 }
 
-function formatDate(value?: string, dateOnly = false) {
+function formatPrague(value?: string, dateOnly = false) {
   if (!value) return "—";
   return new Intl.DateTimeFormat("cs-CZ", dateOnly
     ? { timeZone: "Europe/Prague", day: "numeric", month: "numeric", year: "numeric" }
-    : { timeZone: "Europe/Prague", day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }
+    : { timeZone: "Europe/Prague", day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }
   ).format(new Date(value));
+}
+
+function formatIso(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
+function formatWhen(value?: string) {
+  if (!value) return "—";
+  return `${formatIso(value)}   |   ${formatPrague(value)}`;
 }
 
 function itemStatus(item: RawItem, flexEnabled = false) {
@@ -108,13 +169,9 @@ function orderUiStatus(rawOrderStatus: string, fulfillmentStatus: string | undef
   return "waiting";
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] ?? ch));
-}
-
 function safeFilename(value: string) {
   const cleaned = value.normalize("NFKD").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return cleaned.slice(0, 80) || "soubor";
+  return cleaned.slice(0, 120) || "soubor";
 }
 
 function money(amount: number, currency = "EUR") {
@@ -135,10 +192,31 @@ function requestOrderId(req: import("node:http").IncomingMessage) {
   return orderId;
 }
 
+function exportRoot(order: RawOrder) {
+  return safeFilename(`${order.plate}-${order.order_number || order.id}`);
+}
+
+function scalar(value: string | number | boolean | null | undefined) {
+  if (value === null) return "null";
+  if (value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
 async function fetchJson<T>(url: string, key: string, path: string) {
   const response = await fetch(`${url}/rest/v1/${path}`, { headers: supabaseHeaders(key) });
   if (!response.ok) throw new Error(`Supabase ${response.status}`);
   return response.json() as Promise<T>;
+}
+
+async function fetchOptional<T>(url: string, key: string, path: string, fallback: T) {
+  try {
+    const response = await fetch(`${url}/rest/v1/${path}`, { headers: supabaseHeaders(key) });
+    if (!response.ok) return fallback;
+    return await response.json() as T;
+  } catch {
+    return fallback;
+  }
 }
 
 async function fetchStorage(url: string, key: string, bucket: string, objectPath: string) {
@@ -148,99 +226,277 @@ async function fetchStorage(url: string, key: string, bucket: string, objectPath
   return Buffer.from(await upstream.arrayBuffer());
 }
 
-async function loadOrderBundle(orderId: string) {
+async function loadOrderBundle(orderId: string): Promise<OrderBundle | null> {
   const { url, key } = loadWorkerEnv();
   if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
-  const orders = await fetchJson<RawOrder[]>(url, key, `orders?select=id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,vehicle_type,fuel_type,vehicle_vin,invoice_pdf_path,last_error&id=eq.${encodeURIComponent(orderId)}&limit=1`);
+  const orders = await fetchJson<RawOrder[]>(url, key, `orders?select=id,status,currency,amount_total_minor,processing_fee_minor,email,locale,registration_country,plate,created_at,paid_at,fulfilled_at,flex_enabled,order_number,fulfillment_status,vehicle_type,fuel_type,vehicle_vin,invoice_pdf_path,last_error,plate_country_conflict&id=eq.${encodeURIComponent(orderId)}&limit=1`);
   const order = orders[0];
   if (!order) return null;
-  const vignetteSelect = "id,order_id,country_code,validity,start_date,end_date,price_eur_minor,status,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,fulfillment_screenshots_meta";
-  const tollSelect = "id,order_id,toll_id,country_code,pass_count,pass_date,price_eur_minor,status,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,fulfillment_screenshots_meta";
-  const [vignettes, tolls, official] = await Promise.all([
-    fetchJson<RawItem[]>(url, key, `order_items?select=${vignetteSelect}&order_id=eq.${encodeURIComponent(orderId)}&order=created_at.asc`),
-    fetchJson<RawItem[]>(url, key, `order_bridge_toll_items?select=${tollSelect}&order_id=eq.${encodeURIComponent(orderId)}&order=created_at.asc`),
-    fetchJson<OfficialDocument[]>(url, key, `order_documents?select=id,filename,content_type,storage_bucket,storage_path,country_code,document_type&order_id=eq.${encodeURIComponent(orderId)}&order=created_at.asc`),
+  const vignetteSelect = "id,order_id,country_code,validity,start_date,end_date,price_eur_minor,status,created_at,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,plate_country_conflict,fulfillment_screenshots_meta";
+  const tollSelect = "id,order_id,toll_id,country_code,pass_count,pass_date,price_eur_minor,status,created_at,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,plate_country_conflict,fulfillment_screenshots_meta";
+  const encodedId = encodeURIComponent(orderId);
+  const [vignettes, tolls, official, notes, acks, audits] = await Promise.all([
+    fetchJson<RawItem[]>(url, key, `order_items?select=${vignetteSelect}&order_id=eq.${encodedId}&order=created_at.asc`),
+    fetchJson<RawItem[]>(url, key, `order_bridge_toll_items?select=${tollSelect}&order_id=eq.${encodedId}&order=created_at.asc`),
+    fetchJson<OfficialDocument[]>(url, key, `order_documents?select=id,filename,content_type,storage_bucket,storage_path,country_code,document_type&order_id=eq.${encodedId}&order=created_at.asc`),
+    fetchOptional<ItemNote[]>(url, key, `dashboard_order_item_notes?select=item_id,item_source,country_code,actor_email,body,created_at&order_id=eq.${encodedId}&order=created_at.desc`, []),
+    fetchOptional<ConflictAck[]>(url, key, `dashboard_plate_country_conflict_acks?select=actor_email,previous_value,created_at&order_id=eq.${encodedId}&order=created_at.desc`, []),
+    fetchOptional<ManualAudit[]>(url, key, `manual_fulfillment_audit?select=item_id,item_source,country_code,actor_email,previous_status,note,created_at&order_id=eq.${encodedId}&order=created_at.desc`, []),
   ]);
-  const items: RawItem[] = [
-    ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
-    ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
-  ];
-  return { url, key, order, items, official };
+  return {
+    url,
+    key,
+    order,
+    items: [
+      ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
+      ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
+    ],
+    official,
+    notes,
+    acks,
+    audits,
+  };
 }
 
-function mappedItems(order: RawOrder, items: RawItem[]) {
-  return items.map(item => {
-    const status = itemStatus(item, order.flex_enabled);
-    const passage = item.source === "order_bridge_toll_items" ? passageDisplay(item.toll_id) : undefined;
-    return {
-      country: item.country_code,
-      product: passage
-        ? `${passage.name}${(item.pass_count ?? 1) > 1 ? ` · ${item.pass_count} průjezdy` : ""}`
-        : item.validity ?? "Dálniční známka",
-      validFrom: formatDate(item.pass_date ?? item.start_date, true),
-      validTo: formatDate(item.pass_date ?? item.end_date, true),
-      price: item.price_eur_minor / 100,
-      status,
-      reference: item.state_reference,
-      lastError: item.last_error,
-    };
-  });
+function itemProduct(item: RawItem) {
+  if (item.source === "order_bridge_toll_items") {
+    const passage = passageDisplay(item.toll_id);
+    const count = (item.pass_count ?? 1) > 1 ? ` · ${item.pass_count} průjezdy` : "";
+    return passage ? `${passage.name}${count}` : (item.toll_id ?? "Most / tunel");
+  }
+  return item.validity ?? "Dálniční známka";
 }
 
-function summaryHtml(order: RawOrder, items: ReturnType<typeof mappedItems>) {
-  const uiStatus = orderUiStatus(order.status.toLowerCase().replace(/[\s-]+/g, "_"), order.fulfillment_status, items);
+function attachmentFilename(filename: string) {
+  const ascii = filename.replace(/[^\x20-\x7E]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+class TechSheet {
+  private readonly doc: PDFKit.PDFDocument;
+  private readonly left: number;
+  private readonly width: number;
+  private readonly labelWidth = 168;
+
+  constructor(doc: PDFKit.PDFDocument) {
+    this.doc = doc;
+    this.left = doc.page.margins.left;
+    this.width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  }
+
+  private ensure(height: number) {
+    const bottom = this.doc.page.height - this.doc.page.margins.bottom - 18;
+    if (this.doc.y + height > bottom) this.doc.addPage();
+  }
+
+  title(order: RawOrder) {
+    this.doc.font("MonoBold").fontSize(8).fillColor("#111111").text("EGP DASHBOARD  ·  INTERNÍ TECHNICKÝ LIST", this.left, this.doc.y, { width: this.width });
+    this.doc.font("Mono").fontSize(8).fillColor("#555555").text("Není určeno zákazníkovi. Časy: ISO UTC | Europe/Prague.", { width: this.width });
+    this.doc.moveDown(0.6);
+    this.doc.font("MonoBold").fontSize(14).fillColor("#111111").text(order.plate || "—", { width: this.width });
+    this.doc.font("Mono").fontSize(9).fillColor("#111111").text(order.order_number || "bez order_number", { width: this.width });
+    this.doc.moveDown(0.4);
+    this.rule();
+  }
+
+  heading(text: string) {
+    this.ensure(22);
+    this.doc.moveDown(0.25);
+    this.doc.font("MonoBold").fontSize(8.5).fillColor("#111111").text(text.toUpperCase(), this.left, this.doc.y, { width: this.width });
+    this.doc.moveDown(0.2);
+  }
+
+  rule() {
+    this.ensure(10);
+    const y = this.doc.y + 2;
+    this.doc.save().moveTo(this.left, y).lineTo(this.left + this.width, y).lineWidth(0.7).strokeColor("#222222").stroke().restore();
+    this.doc.y = y + 8;
+  }
+
+  kv(label: string, value: string | number | boolean | null | undefined) {
+    const text = scalar(value);
+    this.doc.font("Mono").fontSize(8);
+    const valueX = this.left + this.labelWidth + 10;
+    const valueWidth = this.width - this.labelWidth - 10;
+    const height = Math.max(11, this.doc.heightOfString(text, { width: valueWidth }));
+    this.ensure(height + 3);
+    const y = this.doc.y;
+    this.doc.fillColor("#666666").text(label, this.left, y, { width: this.labelWidth, lineBreak: false });
+    this.doc.fillColor("#111111").text(text, valueX, y, { width: valueWidth });
+    this.doc.y = y + height + 1.5;
+  }
+
+  note(text: string) {
+    this.doc.font("Mono").fontSize(8);
+    const height = this.doc.heightOfString(text, { width: this.width });
+    this.ensure(height + 4);
+    this.doc.fillColor("#111111").text(text, this.left, this.doc.y, { width: this.width });
+    this.doc.moveDown(0.15);
+  }
+}
+
+function renderTechnicalPdf(bundle: OrderBundle) {
+  const { order, items, official, notes, acks, audits } = bundle;
+  const mapped = items.map(item => ({ item, ui: itemStatus(item, order.flex_enabled) }));
+  const uiStatus = orderUiStatus(order.status.toLowerCase().replace(/[\s-]+/g, "_"), order.fulfillment_status, mapped.map(entry => ({ status: entry.ui })));
   const currency = order.currency || "EUR";
-  const rows = items.map(item => `<tr>
-    <td>${escapeHtml(item.country)}</td>
-    <td>${escapeHtml(item.product)}</td>
-    <td>${escapeHtml(item.validFrom)} – ${escapeHtml(item.validTo)}</td>
-    <td>${escapeHtml(statusLabels[item.status] ?? item.status)}</td>
-    <td>${escapeHtml(item.reference || "—")}</td>
-    <td class="num">${escapeHtml(money(item.price, currency))}</td>
-  </tr>${item.lastError ? `<tr class="error"><td colspan="6">${escapeHtml(item.lastError)}</td></tr>` : ""}`).join("");
-  return `<!doctype html>
-<html lang="cs">
-<head>
-  <meta charset="utf-8" />
-  <title>Souhrn ${escapeHtml(order.plate)} · ${escapeHtml(order.order_number || order.id)}</title>
-  <style>
-    :root { font-family: "DM Sans", Arial, sans-serif; color: #1c1c1c; }
-    body { margin: 28px; }
-    h1 { font-size: 26px; margin: 0 0 4px; }
-    .meta { color: #667068; margin: 0 0 22px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 8px 7px; border-bottom: 1px solid #e4ece5; vertical-align: top; }
-    th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #667068; }
-    .num { text-align: right; white-space: nowrap; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 28px; margin: 18px 0 24px; font-size: 13px; }
-    .grid small { display: block; color: #667068; font-size: 11px; }
-    .totals { margin-top: 18px; text-align: right; }
-    .error td { color: #b43d39; background: #fff6f5; }
-    .print { margin: 18px 0 0; }
-    @media print { .print { display: none; } body { margin: 12mm; } }
-  </style>
-</head>
-<body>
-  <h1>${escapeHtml(order.plate)}</h1>
-  <p class="meta">${escapeHtml(order.registration_country)} · ${escapeHtml(order.order_number || order.id)} · ${escapeHtml(statusLabels[uiStatus] ?? uiStatus)}</p>
-  <div class="grid">
-    <div><small>E-mail</small><strong>${escapeHtml(order.email)}</strong></div>
-    <div><small>Vytvořeno</small><strong>${escapeHtml(formatDate(order.created_at))}</strong></div>
-    <div><small>Zaplaceno</small><strong>${escapeHtml(formatDate(order.paid_at))}</strong></div>
-    <div><small>Typ vozidla</small><strong>${escapeHtml(vehicleLabel(order.vehicle_type))}</strong></div>
-    <div><small>Palivo</small><strong>${escapeHtml(fuelLabel(order.fuel_type))}</strong></div>
-    ${order.vehicle_vin ? `<div><small>VIN</small><strong>${escapeHtml(order.vehicle_vin)}</strong></div>` : ""}
-    ${order.flex_enabled ? "<div><small>Plus</small><strong>ano</strong></div>" : ""}
-  </div>
-  <table>
-    <thead><tr><th>Země</th><th>Položka</th><th>Platnost</th><th>Stav</th><th>Reference</th><th class="num">Cena</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6">Bez položek</td></tr>`}</tbody>
-  </table>
-  <p class="totals"><strong>Celkem ${escapeHtml(money(order.amount_total_minor / 100, currency))}</strong><br /><span>servis ${escapeHtml(money(order.processing_fee_minor / 100, currency))}</span></p>
-  <p class="print"><button type="button" onclick="window.print()">Tisk / uložit jako PDF</button></p>
-  <script>window.addEventListener("load", () => { window.focus(); window.print(); });</script>
-</body>
-</html>`;
+  const generatedAt = new Date().toISOString();
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margin: 36,
+      bufferPages: true,
+      info: {
+        Title: `Technický list ${order.order_number || order.id}`,
+        Author: "EuroGoPass Dashboard",
+        Subject: order.id,
+        Creator: "EGP Dashboard",
+      },
+    });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.registerFont("Mono", FONT_MONO);
+    doc.registerFont("MonoBold", FONT_MONO_BOLD);
+
+    const sheet = new TechSheet(doc);
+    sheet.title(order);
+
+    sheet.heading("Identita");
+    sheet.kv("order_id", order.id);
+    sheet.kv("order_number", order.order_number);
+    sheet.kv("plate", order.plate);
+    sheet.kv("registration_country", order.registration_country);
+    sheet.kv("locale", order.locale);
+    sheet.kv("email", order.email);
+
+    sheet.heading("Stavy");
+    sheet.kv("orders.status", order.status);
+    sheet.kv("dashboard.status", `${uiStatus} (${statusLabels[uiStatus] ?? uiStatus})`);
+    sheet.kv("fulfillment_status", order.fulfillment_status);
+    sheet.kv("plate_country_conflict", order.plate_country_conflict);
+    sheet.kv("flex_enabled", order.flex_enabled);
+    sheet.kv("last_error", order.last_error);
+
+    sheet.heading("Časy");
+    sheet.kv("generated_at", `${generatedAt}   |   ${formatPrague(generatedAt)}`);
+    sheet.kv("created_at", formatWhen(order.created_at));
+    sheet.kv("paid_at", formatWhen(order.paid_at));
+    sheet.kv("fulfilled_at", formatWhen(order.fulfilled_at));
+
+    sheet.heading("Částky");
+    sheet.kv("currency", currency);
+    sheet.kv("amount_total_minor", `${order.amount_total_minor}  (${money(order.amount_total_minor / 100, currency)})`);
+    sheet.kv("processing_fee_minor", `${order.processing_fee_minor}  (${money(order.processing_fee_minor / 100, currency)})`);
+
+    sheet.heading("Vozidlo");
+    sheet.kv("vehicle_type", `${order.vehicle_type ?? "—"}  (${vehicleLabel(order.vehicle_type)})`);
+    sheet.kv("fuel_type", `${order.fuel_type ?? "—"}  (${fuelLabel(order.fuel_type)})`);
+    sheet.kv("vehicle_vin", order.vehicle_vin);
+
+    sheet.heading("Faktura");
+    sheet.kv("invoice_pdf_path", order.invoice_pdf_path);
+    sheet.kv("invoice_present", Boolean(order.invoice_pdf_path));
+
+    sheet.heading(`Položky (${items.length})`);
+    if (!items.length) sheet.note("Bez položek.");
+    mapped.forEach(({ item, ui }, index) => {
+      const screenshots = item.fulfillment_screenshots_meta;
+      sheet.rule();
+      sheet.kv(`#${index + 1} source`, item.source ?? "—");
+      sheet.kv("item_id", item.id);
+      sheet.kv("country_code", item.country_code);
+      sheet.kv("product", itemProduct(item));
+      if (item.source === "order_bridge_toll_items") {
+        sheet.kv("toll_id", item.toll_id);
+        sheet.kv("pass_count", item.pass_count);
+        sheet.kv("pass_date", formatWhen(item.pass_date));
+      } else {
+        sheet.kv("validity", item.validity);
+        sheet.kv("start_date", formatWhen(item.start_date));
+        sheet.kv("end_date", formatWhen(item.end_date));
+      }
+      sheet.kv("price_eur_minor", `${item.price_eur_minor}  (${money(item.price_eur_minor / 100, currency)})`);
+      sheet.kv("raw.status", item.status);
+      sheet.kv("dashboard.status", `${ui} (${statusLabels[ui] ?? ui})`);
+      sheet.kv("plate_country_conflict", item.plate_country_conflict);
+      sheet.kv("created_at", formatWhen(item.created_at));
+      sheet.kv("engine_submitted_at", formatWhen(item.engine_submitted_at));
+      sheet.kv("fulfilled_at", formatWhen(item.fulfilled_at));
+      sheet.kv("failed_at", formatWhen(item.failed_at));
+      sheet.kv("state_reference", item.state_reference);
+      sheet.kv("pdf_storage_path", item.pdf_storage_path);
+      sheet.kv("last_error", item.last_error);
+      sheet.kv("screenshots.bucket", screenshots?.bucket);
+      sheet.kv("screenshots.prefix", screenshots?.storagePrefix);
+      sheet.kv("screenshots.success", screenshots?.success);
+      sheet.kv("screenshots.uploaded_at", formatWhen(screenshots?.uploadedAt));
+      sheet.kv("screenshots.steps", screenshots?.steps?.length ?? 0);
+      for (const step of screenshots?.steps ?? []) {
+        sheet.kv(`  step ${String(step.index).padStart(2, "0")}`, `${step.file}  ·  ${step.name}`);
+      }
+    });
+
+    sheet.heading(`Oficiální doklady (${official.length})`);
+    if (!official.length) sheet.note("Žádné oficiální doklady.");
+    official.forEach((document, index) => {
+      sheet.rule();
+      sheet.kv(`#${index + 1} id`, document.id);
+      sheet.kv("filename", document.filename);
+      sheet.kv("document_type", document.document_type);
+      sheet.kv("content_type", document.content_type);
+      sheet.kv("country_code", document.country_code);
+      sheet.kv("storage_bucket", document.storage_bucket);
+      sheet.kv("storage_path", document.storage_path);
+    });
+
+    sheet.heading(`Operátorské poznámky (${notes.length})`);
+    if (!notes.length) sheet.note("Žádné poznámky.");
+    for (const note of notes) {
+      sheet.rule();
+      sheet.kv("item_id", note.item_id);
+      sheet.kv("item_source", note.item_source);
+      sheet.kv("country_code", note.country_code);
+      sheet.kv("actor_email", note.actor_email);
+      sheet.kv("created_at", formatWhen(note.created_at));
+      sheet.kv("body", note.body);
+    }
+
+    sheet.heading(`Ruční FULFILLED (${audits.length})`);
+    if (!audits.length) sheet.note("Žádný ruční fulfillment.");
+    for (const audit of audits) {
+      sheet.rule();
+      sheet.kv("item_id", audit.item_id);
+      sheet.kv("item_source", audit.item_source);
+      sheet.kv("country_code", audit.country_code);
+      sheet.kv("actor_email", audit.actor_email);
+      sheet.kv("previous_status", audit.previous_status);
+      sheet.kv("created_at", formatWhen(audit.created_at));
+      sheet.kv("note", audit.note);
+    }
+
+    sheet.heading(`ACK konfliktu SPZ (${acks.length})`);
+    if (!acks.length) sheet.note("Žádný ACK záznam.");
+    for (const ack of acks) {
+      sheet.rule();
+      sheet.kv("actor_email", ack.actor_email);
+      sheet.kv("previous_value", ack.previous_value);
+      sheet.kv("created_at", formatWhen(ack.created_at));
+    }
+
+    const range = doc.bufferedPageRange();
+    for (let i = 0; i < range.count; i += 1) {
+      doc.switchToPage(range.start + i);
+      const footerY = doc.page.height - 28;
+      doc.font("Mono").fontSize(7).fillColor("#666666")
+        .text(`${order.id}   ·   ${i + 1}/${range.count}`, 36, footerY, { width: doc.page.width - 72, align: "left" });
+    }
+    doc.flushPages();
+    doc.end();
+  });
 }
 
 async function sendBundle(orderId: string, res: import("node:http").ServerResponse) {
@@ -253,8 +509,8 @@ async function sendBundle(orderId: string, res: import("node:http").ServerRespon
   }
   const { url, key, order, items, official } = loaded;
   const zip = new JSZip();
-  const root = safeFilename(`${order.plate}-${order.order_number || order.id.slice(0, 8)}`);
-  zip.file(`${root}/souhrn.html`, summaryHtml(order, mappedItems(order, items)));
+  const root = exportRoot(order);
+  zip.file(`${root}/souhrn.pdf`, await renderTechnicalPdf(loaded));
   if (order.invoice_pdf_path) {
     const bytes = await fetchStorage(url, key, "invoices", order.invoice_pdf_path);
     if (bytes) zip.file(`${root}/doklady/${safeFilename(`faktura-EGP-${order.order_number || order.id}.pdf`)}`, bytes);
@@ -278,10 +534,9 @@ async function sendBundle(orderId: string, res: import("node:http").ServerRespon
     }
   }
   const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-  const filename = `${root}.zip`;
   res.statusCode = 200;
   res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/[^\x20-\x7E]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.setHeader("Content-Disposition", attachmentFilename(`${root}.zip`));
   res.setHeader("Cache-Control", "private, no-store");
   res.end(buffer);
 }
@@ -294,10 +549,12 @@ async function sendSummary(orderId: string, res: import("node:http").ServerRespo
     res.end(JSON.stringify({ error: "Objednávka nebyla nalezena" }));
     return;
   }
+  const buffer = await renderTechnicalPdf(loaded);
   res.statusCode = 200;
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", attachmentFilename(`${exportRoot(loaded.order)}.pdf`));
   res.setHeader("Cache-Control", "private, no-store");
-  res.end(summaryHtml(loaded.order, mappedItems(loaded.order, loaded.items)));
+  res.end(buffer);
 }
 
 export function orderExportApi() {

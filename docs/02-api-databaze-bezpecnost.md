@@ -29,8 +29,8 @@ Ne-GET požadavky mimo allowlist → **405** (write policy).
 | Method | Path | Popis |
 |--------|------|--------|
 | `GET` | `/api/orders` | Seznam objednávek + položky (včetně `plateCountryConflict`). Při čtení jen `pending` / `paid` / `awaiting_payment` / `waiting_payment` / `fulfilled`; stav `test` a testovací SPZ jen z písmen A se skryjí. |
-| `GET` | `/api/orders/bundle?orderId=` | ZIP dokladů, screenshotů a HTML souhrnu objednávky |
-| `GET` | `/api/orders/summary?orderId=` | Tisknutelný HTML souhrn objednávky (uložit jako PDF) |
+| `GET` | `/api/orders/bundle?orderId=` | ZIP dokladů, screenshotů a interního PDF listu objednávky |
+| `GET` | `/api/orders/summary?orderId=` | Interní technický PDF list objednávky (attachment) |
 | `POST` | `/api/orders/fulfill-item` | Ruční FULFILLED přes RPC |
 | `POST` | `/api/orders/ack-plate-country-conflict` | ACK konfliktu SPZ/země přes RPC |
 | `GET` | `/api/orders/item-notes?orderId=` | Poznámky k položkám |
