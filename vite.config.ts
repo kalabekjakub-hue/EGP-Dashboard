@@ -9,6 +9,7 @@ import { dashboardOrderStatusQuery, isDashboardVisibleOrderStatus, isHiddenTestP
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
 import { editorialApi } from "./editorial-api";
+import { orderExportApi } from "./order-export-api";
 
 const execFileAsync = promisify(execFile);
 const authSessions = new Map<string, { email: string; expiresAt: number }>();
@@ -1561,5 +1562,5 @@ export default defineConfig(({ mode }) => {
 });
 
 export function createApiPlugins(env: Record<string, string>) {
-  return [authApi(), dashboardWritePolicy(), editorialApi(editorialActorEmail), manualFulfillmentApi(), affiliateAnalyticsApi(), supabaseReadApi(), gmailIngestReadApi(), documentReadApi(), screenshotReadApi(), workerStatusApi(), workerLogProxy(), postHogReadApi(env)];
+  return [authApi(), dashboardWritePolicy(), editorialApi(editorialActorEmail), manualFulfillmentApi(), orderExportApi(), affiliateAnalyticsApi(), supabaseReadApi(), gmailIngestReadApi(), documentReadApi(), screenshotReadApi(), workerStatusApi(), workerLogProxy(), postHogReadApi(env)];
 }

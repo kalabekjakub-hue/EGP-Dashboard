@@ -137,7 +137,7 @@ Factory je exportována z `vite.config.ts` jako `createApiPlugins`.
 
 Registrace (pořadí důležité kvůli write policy a auth):
 
-`authApi` → `dashboardWritePolicy` → `editorialApi` → fulfill/notes → `affiliateAnalyticsApi` → `supabaseReadApi` → `gmailIngestReadApi` → `documentReadApi` → `screenshotReadApi` → `workerStatusApi` → `workerLogProxy` → `postHogReadApi`
+`authApi` → `dashboardWritePolicy` → `editorialApi` → fulfill/notes → `orderExportApi` → `affiliateAnalyticsApi` → `supabaseReadApi` → `gmailIngestReadApi` → `documentReadApi` → `screenshotReadApi` → `workerStatusApi` → `workerLogProxy` → `postHogReadApi`
 
 ## Oddělení odpovědností
 
@@ -263,7 +263,7 @@ Navigace: `history.pushState` / `popstate` + `pathForView` / `routeFromPath`.
 
 **Dashboard (`/`):** sloupec objednávek, centrum pozornosti, náhled Redakce a PostHog, živý log.
 
-**Objednávky:** seznam + detail, humanizovaná timeline, ruční FULFILLED, poznámky k položkám, odkazy na screenshoty/doklady. Karty: dokončená zelená, zpracovává se modrá, selhání červená, Plus tyrkysová, čeká na zpracování žlutá, čeká na platbu šedá, konflikt SPZ oranžová. Dokončená karta s konfliktem zůstává zelená a ukáže jen štítek konfliktu. Archiv `/orders` drží časové pořadí; dokončené objednávky s konfliktem se netopují nahoru.
+**Objednávky:** seznam + detail, humanizovaná timeline, ruční FULFILLED, poznámky k položkám, odkazy na screenshoty/doklady. **Stáhnout vše** stáhne ZIP (faktura, oficiální doklady, screenshoty, souhrn). **PDF souhrn** otevře tisknutelný přehled. Karty: dokončená zelená, zpracovává se modrá, selhání červená, Plus tyrkysová, čeká na zpracování žlutá, čeká na platbu šedá, konflikt SPZ oranžová. Dokončená karta s konfliktem zůstává zelená a ukáže jen štítek konfliktu. Levý náhled i archiv `/orders` řadí podle času; selhání a dokončené konflikty se netopují nahoru.
 
 **Logy:** proxy EGP Worker monitor (technické i humanizované).
 
@@ -307,6 +307,7 @@ EGP DSHBRD/
 ├── server-config.ts          # Env + allowlist
 ├── editorial-api.ts          # Redakce backend
 ├── editorial-worker.ts       # Redakce poll worker
+├── order-export-api.ts       # ZIP + souhrn objednávky
 ├── editorial-api.test.ts
 ├── mail-ingest.ts            # Gmail sidecar
 ├── Dockerfile
@@ -322,6 +323,7 @@ EGP DSHBRD/
 | `src/order-filters.ts` | Viditelné stavy objednávek a skrytí testovacích SPZ při čtení |
 | `src/styles.css` | Styling |
 | `src/editorial.tsx` | Redakce UI |
+| `order-export-api.ts` | ZIP balíček a tisknutelný souhrn objednávky |
 | `vite.config.ts` | API mimo redakci |
 | `editorial-api.ts` | `/api/editorial/*` + AI |
 | `server.ts` | Prod: pluginy + `sirv(dist)` |

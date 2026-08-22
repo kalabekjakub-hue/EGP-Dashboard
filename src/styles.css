@@ -716,6 +716,8 @@
 .plate-conflict-banner + .items-section{margin-top:22px}
 .manual-fulfill-icon.warn{background:#fff0bd;color:#806019}
 .hero-actions{flex-wrap:wrap;max-width:min(720px,calc(100% - 38px));justify-content:flex-end}
+.hero-actions button:disabled{opacity:.55;cursor:wait}
+.hero-export-error{flex-basis:100%;margin:0;text-align:right;color:#b43d39;font-size:11px;font-weight:600}
 @media(max-width:760px){
   .orders-toolbar{width:100%;justify-content:stretch}
   .orders-toolbar .search.wide{flex:1;min-width:0}

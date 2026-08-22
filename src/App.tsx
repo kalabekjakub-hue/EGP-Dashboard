@@ -579,15 +579,14 @@ function previewOrderRank(status: OrderStatus) {
   if (status === "processing") return 0;
   if (status === "waiting") return 1;
   if (status === "plus") return 2;
-  if (status === "failed") return 3;
-  if (status === "fulfilled") return 4;
-  return 5;
+  return 3;
 }
 
 function isActionablePlateConflict(order: Order) {
   return order.plateCountryConflict === true
     && Boolean(order.paidAtIso)
     && order.status !== "fulfilled"
+    && order.status !== "failed"
     && order.status !== "awaiting_payment";
 }
 
@@ -1490,6 +1489,9 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const [noteState, setNoteState] = useState<"idle" | "saving" | "error">("idle");
   const [ackOpen, setAckOpen] = useState(false);
   const [ackState, setAckState] = useState<"idle" | "saving" | "error">("idle");
+  const [exportState, setExportState] = useState<"idle" | "bundle" | "error">("idle");
+
+  useEffect(() => { setExportState("idle"); }, [order.id]);
 
   const peerOrders = useMemo(() => {
     const plate = normalizePlateKey(order.plate);
@@ -1658,6 +1660,31 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const hasNote = (itemId?: string) => Boolean(itemId && (noteTextForItem(itemId) || manualAudit.some(entry => entry.item_id === itemId && entry.note?.trim())));
   const noteTargetHasStored = Boolean(noteItemId && (itemNotes.some(note => note.item_id === noteItemId) || noteDrafts[noteItemId]));
 
+  const downloadBundle = async () => {
+    setExportState("bundle");
+    try {
+      const response = await fetch(`/api/orders/bundle?orderId=${encodeURIComponent(order.id)}`);
+      if (!response.ok) throw new Error();
+      const blob = await response.blob();
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const stamp = order.plate.replace(/\s+/g, "-") || order.id.slice(0, 8);
+      link.href = href;
+      link.download = `${stamp}-${order.number || order.id.slice(0, 8)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(href), 1_000);
+      setExportState("idle");
+    } catch {
+      setExportState("error");
+    }
+  };
+
+  const openSummary = () => {
+    window.open(`/api/orders/summary?orderId=${encodeURIComponent(order.id)}`, "_blank", "noopener");
+  };
+
   return (
     <main className="page-shell">
       <BackButton onClick={back} />
@@ -1665,7 +1692,16 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
         <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p>{order.plus && <span className="plus-badge"><Plus size={13} strokeWidth={3} /> Plus</span>}</div></div>
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
-        <div className="hero-actions"><button><Download size={16} /> Stáhnout vše</button><button><FileText size={16} /> PDF souhrn</button><button onClick={() => navigate("screenshots")}>Screenshoty</button><button onClick={() => navigate("documents")}>Doklady</button><button className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button></div>
+        <div className="hero-actions">
+          <button type="button" onClick={() => void downloadBundle()} disabled={exportState === "bundle"}>
+            <Download size={16} /> {exportState === "bundle" ? "Připravuji…" : "Stáhnout vše"}
+          </button>
+          <button type="button" onClick={openSummary}><FileText size={16} /> PDF souhrn</button>
+          <button type="button" onClick={() => navigate("screenshots")}>Screenshoty</button>
+          <button type="button" onClick={() => navigate("documents")}>Doklady</button>
+          <button type="button" className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button>
+          {exportState === "error" && <span className="hero-export-error">Balíček se nepodařilo stáhnout. Zkus to znovu.</span>}
+        </div>
       </section>
       {order.plateCountryConflict === true && (
         <section className="plate-conflict-banner surface">

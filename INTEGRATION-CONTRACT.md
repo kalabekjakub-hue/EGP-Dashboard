@@ -61,6 +61,7 @@ Všechny e-maily v dashboard allowlistu mají totožná dashboard oprávnění. 
 ## Pravidla pro další integrace
 
 - Supabase, PostHog, logy, screenshoty, doklady a Retell AI jsou z pohledu dashboardu pouze zdroje pro čtení; výjimkou jsou výslovně povolené fulfillment, poznámky k položkám, plate-country ACK a redakční operace popsané výše.
+- `GET /api/orders/bundle` a `GET /api/orders/summary` jsou pouze čtení: ZIP dokladů/screenshotů a tisknutelný souhrn jedné objednávky, bez zápisu do databáze.
 - Tajné klíče patří pouze do serverového prostředí na VPS; nikdy do `VITE_*` proměnných.
 - Příjem e-mailu, Retell webhooků a dalších externích událostí musí zajišťovat samostatný ingest/worker. Dashboard tato data pouze čte ze Supabase.
 - `orders.invoice_pdf_path` označuje fakturu vystavenou EuroGoPass zákazníkovi. Nesmí se prezentovat jako nákupní doklad z oficiálního portálu.

@@ -62,7 +62,7 @@ Manuálně: login/logout, orders demo i live, FULFILLED/poznámky (opatrně), do
 
 | Cesta | Editovat? |
 |-------|-----------|
-| `src/*`, `vite.config.ts`, `editorial-api.ts`, `mail-ingest.ts` | ano |
+| `src/*`, `vite.config.ts`, `editorial-api.ts`, `order-export-api.ts`, `mail-ingest.ts` | ano |
 | `supabase/migrations/` | ano (aditivní SQL) |
 | `secrets/`, `runtime/` | lokální, necommitovat |
 | `dist/`, `node_modules/` | generované |
@@ -97,7 +97,7 @@ Necommituj `.env*`, `secrets/`, `runtime/auth`. Service role ne do frontendu. No
 Multi-stage `Dockerfile`:
 
 1. Build: `npm ci` + `npm run build`
-2. Runtime: `npm ci --omit=dev`, copy `dist` + TS servery (`server.ts`, `vite.config.ts`, `editorial-api.ts`, `mail-ingest.ts`, …) + prompts/config/src
+2. Runtime: `npm ci --omit=dev`, copy `dist` + TS servery (`server.ts`, `vite.config.ts`, `editorial-api.ts`, `order-export-api.ts`, `mail-ingest.ts`, …) + prompts/config/src
 3. `CMD npm start`, `EXPOSE 3100` (runtime přes `tsx`)
 
 ## Compose služby
