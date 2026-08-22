@@ -4,6 +4,8 @@ Kompletní popis účelu, architektury, UI a mapy souborů.
 Produkce: [https://admin.eurogopass.com](https://admin.eurogopass.com)  
 Balíček: `eurogopass-admin-dashboard` · v0.1.0 · privátní · ESM
 
+**Aktualizace:** 2026-08-22
+
 Závazné kontrakty (mají přednost při rozporu): [`AGENTS.md`](../AGENTS.md), [`INTEGRATION-CONTRACT.md`](../INTEGRATION-CONTRACT.md).
 
 Další dokumenty: [API, databáze, bezpečnost](02-api-databaze-bezpecnost.md) · [Redakce, ingest, integrace](03-redakce-integrace-konfigurace.md) · [Vývoj, nasazení, provoz](04-vyvoj-nasazeni-provoz.md)
@@ -11,6 +13,17 @@ Další dokumenty: [API, databáze, bezpečnost](02-api-databaze-bezpecnost.md) 
 ---
 
 # 1. Přehled projektu
+
+## Worker SSOT (vignette fulfillment — mimo tento repo)
+
+| | |
+|--|--|
+| **Repo** | `eurogopass-fulfillment-worker` — detail: `docs/WORKER-CONTEXT.md` |
+| **Default země** | `CZ,SK,HU,BG,SI,RO,AT` (CH opt-in; 8 adaptérů včetně CH v kódu) |
+| **Platba na portálu** | Wise card pool ve workeru; Stripe = zákazník→EGP na webu |
+| **Model** | Item-centric claim pending line items ze Supabase; **bez HTTP callbacku** worker→egp |
+| **Oddělené stacky** | passage (mosty), FR free-flow, NO/SE EPASS24 (flagy default off) |
+| **Katalog vs worker** | Sellable katalog na webu (vč. MD) ≠ MD worker adapter; CH sellable ≠ CH v default countries |
 
 ## Co to je
 

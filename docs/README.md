@@ -2,6 +2,8 @@
 
 Čtyři soubory — vhodné ke kopírování. Závazné kontrakty v kořeni (`AGENTS.md`, `INTEGRATION-CONTRACT.md`) mají při rozporu přednost.
 
+**Aktualizace:** 2026-08-22 · Worker SSOT: `eurogopass-fulfillment-worker` (`docs/WORKER-CONTEXT.md`) — viz box v [01-projekt-architektura-frontend.md](01-projekt-architektura-frontend.md).
+
 | # | Soubor | Obsah |
 |---|--------|--------|
 | 1 | [01-projekt-architektura-frontend.md](01-projekt-architektura-frontend.md) | Přehled, architektura, UI, mapa souborů |
