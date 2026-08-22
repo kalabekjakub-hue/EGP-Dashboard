@@ -186,6 +186,48 @@ function fuelLabel(value?: string) {
   return ({ standard: "Benzín / nafta", "electric-hydrogen": "Elektřina / vodík", "plugin-hybrid": "Plug-in hybrid", biomethane: "Biometan", "natural-gas": "Zemní plyn" } as Record<string, string>)[value ?? ""] ?? value ?? "Neuvedeno";
 }
 
+function vehicleLabelEn(value?: string) {
+  return ({ passenger: "Passenger car", "van-large": "Van", motorcycle: "Motorcycle" } as Record<string, string>)[value ?? ""] ?? value ?? "Not provided";
+}
+
+function fuelLabelEn(value?: string) {
+  return ({ standard: "Petrol / diesel", "electric-hydrogen": "Electric / hydrogen", "plugin-hybrid": "Plug-in hybrid", biomethane: "Biomethane", "natural-gas": "Natural gas" } as Record<string, string>)[value ?? ""] ?? value ?? "Not provided";
+}
+
+const PASSAGE_EN: Record<string, string> = {
+  "at-a9-bosruck": "Bosruck Tunnel (A9)",
+  "at-a9-gleinalm": "Gleinalm Tunnel (A9)",
+  "at-a10-tauern": "Tauern Tunnel and Katschberg Tunnel (A10)",
+  "at-a11-karawanken": "Karawanken Tunnel (A11)",
+  "at-a11-karawanken-south": "Karawanken Tunnel (A11) · towards Slovenia",
+  "at-a13-brenner": "Brenner Motorway (A13)",
+  "at-s16-arlberg": "Arlberg Road Tunnel (S16)",
+  "ro-fetesti-cernavoda": "Fetești–Cernavodă Bridges (A2)",
+  "ro-fetesti-peaj": "Fetești–Cernavodă Bridges (A2)",
+  "ro-giurgiu-ruse": "Giurgiu–Ruse Danube Bridge",
+  "ro-ruse-giurgiu-to-bg": "Giurgiu–Ruse Danube Bridge",
+  "bg-ruse-giurgiu": "Ruse–Giurgiu Danube Bridge",
+  "bg-ruse-giurgiu-to-ro": "Ruse–Giurgiu Danube Bridge",
+  "ro-calafat-vidin": "Calafat–Vidin Danube Bridge",
+  "ro-vidin-calafat-to-bg": "Calafat–Vidin Danube Bridge",
+  "bg-vidin-calafat": "Vidin–Calafat Danube Bridge",
+  "bg-vidin-calafat-to-ro": "Vidin–Calafat Danube Bridge",
+};
+
+function itemProductEn(item: RawItem) {
+  if (item.source === "order_bridge_toll_items") {
+    const key = (item.toll_id ?? "").trim().toLowerCase();
+    const name = PASSAGE_EN[key] ?? passageDisplay(item.toll_id).name;
+    const count = (item.pass_count ?? 1) > 1 ? ` · ${item.pass_count} passages` : "";
+    return `${name}${count}`;
+  }
+  return item.validity ?? "Vignette";
+}
+
+function itemStartDate(item: RawItem) {
+  return item.source === "order_bridge_toll_items" ? item.pass_date : item.start_date;
+}
+
 function requestOrderId(req: import("node:http").IncomingMessage) {
   const orderId = new URL(req.url ?? "/", "http://dashboard.local").searchParams.get("orderId")?.trim() ?? "";
   if (!orderId || orderId.length > 80) return "";
@@ -290,11 +332,29 @@ class TechSheet {
   }
 
   title(order: RawOrder) {
-    this.doc.font("MonoBold").fontSize(8).fillColor("#111111").text("EGP DASHBOARD  ·  INTERNÍ TECHNICKÝ LIST", this.left, this.doc.y, { width: this.width });
-    this.doc.font("Mono").fontSize(8).fillColor("#555555").text("Není určeno zákazníkovi. Časy: ISO UTC | Europe/Prague.", { width: this.width });
+    this.banner(
+      "EGP DASHBOARD  ·  INTERNÍ TECHNICKÝ LIST",
+      "Není určeno zákazníkovi. Časy: ISO UTC | Europe/Prague.",
+      order.plate || "—",
+      order.order_number || "bez order_number",
+    );
+  }
+
+  customerTitle(order: RawOrder) {
+    this.banner(
+      "EUROGOPASS  ·  FULFILLMENT CONFIRMATION",
+      "Customer copy. Times: ISO UTC | Europe/Prague.",
+      order.plate || "—",
+      order.order_number || "bez order_number",
+    );
+  }
+
+  private banner(kicker: string, note: string, heading: string, subtitle: string) {
+    this.doc.font("MonoBold").fontSize(8).fillColor("#111111").text(kicker, this.left, this.doc.y, { width: this.width });
+    this.doc.font("Mono").fontSize(8).fillColor("#555555").text(note, { width: this.width });
     this.doc.moveDown(0.6);
-    this.doc.font("MonoBold").fontSize(14).fillColor("#111111").text(order.plate || "—", { width: this.width });
-    this.doc.font("Mono").fontSize(9).fillColor("#111111").text(order.order_number || "bez order_number", { width: this.width });
+    this.doc.font("MonoBold").fontSize(14).fillColor("#111111").text(heading, { width: this.width });
+    this.doc.font("Mono").fontSize(9).fillColor("#111111").text(subtitle, { width: this.width });
     this.doc.moveDown(0.4);
     this.rule();
   }
@@ -499,6 +559,74 @@ function renderTechnicalPdf(bundle: OrderBundle) {
   });
 }
 
+function renderCustomerPdf(bundle: OrderBundle) {
+  const { order, items } = bundle;
+  const generatedAt = new Date().toISOString();
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: "A4",
+      margin: 36,
+      bufferPages: true,
+      info: {
+        Title: `Fulfillment confirmation ${order.order_number || order.id}`,
+        Author: "EuroGoPass Dashboard",
+        Subject: order.id,
+        Creator: "EGP Dashboard",
+      },
+    });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.registerFont("Mono", FONT_MONO);
+    doc.registerFont("MonoBold", FONT_MONO_BOLD);
+
+    const sheet = new TechSheet(doc);
+    sheet.customerTitle(order);
+
+    sheet.heading("Identity");
+    sheet.kv("order_id", order.id);
+    sheet.kv("order_number", order.order_number);
+    sheet.kv("plate", order.plate);
+    sheet.kv("registration_country", order.registration_country);
+
+    sheet.heading("Times");
+    sheet.kv("generated_at", formatWhen(generatedAt));
+    sheet.kv("created_at", formatWhen(order.created_at));
+    sheet.kv("fulfilled_at", formatWhen(order.fulfilled_at));
+
+    sheet.heading("Vehicle");
+    sheet.kv("vehicle_type", `${order.vehicle_type ?? "—"}  (${vehicleLabelEn(order.vehicle_type)})`);
+    sheet.kv("fuel_type", `${order.fuel_type ?? "—"}  (${fuelLabelEn(order.fuel_type)})`);
+    sheet.kv("vehicle_vin", order.vehicle_vin);
+
+    sheet.heading(`Items (${items.length})`);
+    if (!items.length) sheet.note("No items.");
+    items.forEach((item, index) => {
+      sheet.rule();
+      sheet.kv(`#${index + 1} source`, item.source ?? "—");
+      sheet.kv("item_id", item.id);
+      sheet.kv("country_code", item.country_code);
+      sheet.kv("product", itemProductEn(item));
+      sheet.kv("start_date", formatWhen(itemStartDate(item)));
+      sheet.kv("created_at", formatWhen(item.created_at));
+      sheet.kv("fulfilled_at", formatWhen(item.fulfilled_at));
+    });
+
+    const range = doc.bufferedPageRange();
+    for (let i = 0; i < range.count; i += 1) {
+      doc.switchToPage(range.start + i);
+      const footerY = doc.page.height - 28;
+      doc.font("Mono").fontSize(7).fillColor("#666666")
+        .text(`${order.id}   ·   ${i + 1}/${range.count}`, 36, footerY, { width: doc.page.width - 72, align: "left" });
+    }
+    doc.flushPages();
+    doc.end();
+  });
+}
+
 async function sendBundle(orderId: string, res: import("node:http").ServerResponse) {
   const loaded = await loadOrderBundle(orderId);
   if (!loaded) {
@@ -511,6 +639,7 @@ async function sendBundle(orderId: string, res: import("node:http").ServerRespon
   const zip = new JSZip();
   const root = exportRoot(order);
   zip.file(`${root}/souhrn.pdf`, await renderTechnicalPdf(loaded));
+  zip.file(`${root}/fulfillment-en.pdf`, await renderCustomerPdf(loaded));
   if (order.invoice_pdf_path) {
     const bytes = await fetchStorage(url, key, "invoices", order.invoice_pdf_path);
     if (bytes) zip.file(`${root}/doklady/${safeFilename(`faktura-EGP-${order.order_number || order.id}.pdf`)}`, bytes);
@@ -557,6 +686,22 @@ async function sendSummary(orderId: string, res: import("node:http").ServerRespo
   res.end(buffer);
 }
 
+async function sendCustomerSummary(orderId: string, res: import("node:http").ServerResponse) {
+  const loaded = await loadOrderBundle(orderId);
+  if (!loaded) {
+    res.statusCode = 404;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ error: "Objednávka nebyla nalezena" }));
+    return;
+  }
+  const buffer = await renderCustomerPdf(loaded);
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", attachmentFilename(`${exportRoot(loaded.order)}-EN.pdf`));
+  res.setHeader("Cache-Control", "private, no-store");
+  res.end(buffer);
+}
+
 export function orderExportApi() {
   return {
     name: "eurogopass-order-export-api",
@@ -599,6 +744,29 @@ export function orderExportApi() {
             return;
           }
           await sendSummary(orderId, res);
+        } catch (error) {
+          if (!res.headersSent) {
+            res.statusCode = 502;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ error: error instanceof Error ? error.message : "Souhrn se nepodařilo připravit" }));
+          }
+        }
+      });
+      server.middlewares.use("/api/orders/customer-summary", async (req, res) => {
+        try {
+          if (req.method !== "GET") {
+            res.statusCode = 405;
+            res.end(JSON.stringify({ error: "Method not allowed" }));
+            return;
+          }
+          const orderId = requestOrderId(req);
+          if (!orderId) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ error: "Chybí orderId" }));
+            return;
+          }
+          await sendCustomerSummary(orderId, res);
         } catch (error) {
           if (!res.headersSent) {
             res.statusCode = 502;
