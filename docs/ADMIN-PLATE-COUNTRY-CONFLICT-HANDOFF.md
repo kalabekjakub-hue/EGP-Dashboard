@@ -124,7 +124,7 @@ Kanonicka cesta: **primy Supabase zapis** (§3.2), ne worker HTTP.
 
 ## 7. Acceptance checklist (dashboard)
 
-- [x] Seznam / filtr `plate_country_conflict = true` (Všechny objednávky + Centrum pozornosti)
+- [x] Seznam / filtr `plate_country_conflict = true` (Všechny objednávky + Centrum pozornosti). Archiv `/orders` řadí chronologicky; dokončené objednávky s konfliktem se netopují. Testovací SPZ `AAA`/`AAAAA` jsou skryté při čtení.
 - [x] Detail order: flag + ack CTA kdyz `true`
 - [x] Ack nastavi `false` na orders + order_items + order_bridge_toll_items (RPC `ack_plate_country_conflict`)
 - [ ] Po ack zmizi z listu; worker claimne pending (pokud jine filtry dovoli) — overit po nasazeni migrace

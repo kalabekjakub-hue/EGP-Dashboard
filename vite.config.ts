@@ -5,6 +5,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { dashboardOrderStatusQuery, isDashboardVisibleOrderStatus, isHiddenTestPlate, normalizePlateKey } from "./src/order-filters";
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
 import { editorialApi } from "./editorial-api";
@@ -324,7 +325,7 @@ function supabaseReadApi() {
           const requestUrl = new URL(req.url ?? "/", "http://localhost");
           const requestedLimit = Number(requestUrl.searchParams.get("limit") ?? 200);
           const orderLimit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 500) : 200;
-          const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&order=created_at.desc&limit=${orderLimit}`, { headers });
+          const orderResponse = await fetch(`${url}/rest/v1/orders?select=${orderSelect}&${dashboardOrderStatusQuery()}&order=created_at.desc&limit=${orderLimit}`, { headers });
           if (!orderResponse.ok) throw new Error(`Orders API ${orderResponse.status}`);
           const rawOrders = await orderResponse.json() as RawOrder[];
           const ecbRates = await loadEcbRates();
@@ -354,7 +355,6 @@ function supabaseReadApi() {
             ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
             ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
           ];
-          const normalizedPlate = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
           const itemSignature = (orderId: string) => JSON.stringify(allItems
             .filter(item => item.order_id === orderId)
             .map(item => item.source === "order_bridge_toll_items"
@@ -372,7 +372,7 @@ function supabaseReadApi() {
               && !candidate.paid_at
               && ["pending", "awaiting_payment"].includes(candidate.status.toLowerCase().replace(/[\s-]+/g, "_"))
               && Date.parse(candidate.created_at) < Date.parse(paidOrder.created_at)
-              && normalizedPlate(candidate.plate) === normalizedPlate(paidOrder.plate)
+              && normalizePlateKey(candidate.plate) === normalizePlateKey(paidOrder.plate)
               && candidate.registration_country.toUpperCase() === paidOrder.registration_country.toUpperCase()
               && itemSignature(candidate.id) === paidSignature
             );
@@ -380,7 +380,9 @@ function supabaseReadApi() {
             matches.forEach(match => hiddenPendingIds.add(match.id));
             originalPendingCreatedAt.set(paidOrder.id, matches.reduce((earliest, match) => Date.parse(match.created_at) < Date.parse(earliest) ? match.created_at : earliest, matches[0].created_at));
           }
-          const data = rawOrders.filter(order => !hiddenPendingIds.has(order.id)).map(order => {
+          const data = rawOrders
+            .filter(order => !hiddenPendingIds.has(order.id) && isDashboardVisibleOrderStatus(order.status) && !isHiddenTestPlate(order.plate))
+            .map(order => {
             const items = allItems.filter(item => item.order_id === order.id).map(item => {
               const status = itemStatus(item, order.flex_enabled);
               const passage = item.source === "order_bridge_toll_items" ? passageDisplay(item.toll_id) : undefined;
@@ -686,11 +688,11 @@ function affiliateAnalyticsApi() {
           const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
           const [affiliateResponse, orderResponse] = await Promise.all([
             fetch(`${url}/rest/v1/affiliates?select=id,code,display_name,commission_rate_bps,status&order=created_at.asc`, { headers }),
-            fetch(`${url}/rest/v1/orders?select=id,affiliate_id,affiliate_commission_minor,affiliate_commission_status,amount_total_minor,currency,status,created_at,paid_at&affiliate_id=not.is.null&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=5000`, { headers }),
+            fetch(`${url}/rest/v1/orders?select=id,affiliate_id,affiliate_commission_minor,affiliate_commission_status,amount_total_minor,currency,status,created_at,paid_at&affiliate_id=not.is.null&${dashboardOrderStatusQuery()}&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=5000`, { headers }),
           ]);
           if (!affiliateResponse.ok || !orderResponse.ok) throw new Error("Affiliate data nejsou dostupná");
           const affiliates = await affiliateResponse.json() as Array<{ id: string; code: string; display_name: string; commission_rate_bps: number; status: string }>;
-          const orders = await orderResponse.json() as Array<{ id: string; affiliate_id: string; affiliate_commission_minor?: number; affiliate_commission_status?: string; amount_total_minor: number; status: string; created_at: string; paid_at?: string }>;
+          const orders = (await orderResponse.json() as Array<{ id: string; affiliate_id: string; affiliate_commission_minor?: number; affiliate_commission_status?: string; amount_total_minor: number; status: string; created_at: string; paid_at?: string }>).filter(order => isDashboardVisibleOrderStatus(order.status));
           const partners = affiliates.map(affiliate => {
             const partnerOrders = orders.filter(order => order.affiliate_id === affiliate.id);
             return {
@@ -1276,16 +1278,13 @@ type PaidOrderAnalyticsRow = {
   flex_amount_minor: number;
   registration_country?: string | null;
   plate?: string | null;
+  status?: string | null;
 };
 
-const ANALYTICS_EXCLUDED_PLATES = new Set(["AAAAA", "AAAAAA", "7B33476", "7B33479", "3BM9106"]);
-
-function normalizeAnalyticsPlate(plate: string) {
-  return plate.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
+const ANALYTICS_EXCLUDED_VEHICLE_PLATES = new Set(["7B33476", "7B33479", "3BM9106"]);
 
 function isAnalyticsExcludedPlate(plate?: string | null) {
-  return ANALYTICS_EXCLUDED_PLATES.has(normalizeAnalyticsPlate(plate ?? ""));
+  return isHiddenTestPlate(plate) || ANALYTICS_EXCLUDED_VEHICLE_PLATES.has(normalizePlateKey(plate ?? ""));
 }
 
 async function loadPaidOrderAnalytics(since?: Date) {
@@ -1295,9 +1294,9 @@ async function loadPaidOrderAnalytics(since?: Date) {
   const paidFilter = since
     ? `paid_at=gte.${encodeURIComponent(since.toISOString())}`
     : "paid_at=not.is.null";
-  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled,vignettes_subtotal_minor,processing_fee_minor,flex_amount_minor,registration_country,plate&${paidFilter}&order=paid_at.asc&limit=5000`, { headers });
+  const response = await fetch(`${url}/rest/v1/orders?select=id,paid_at,amount_total_minor,currency,flex_enabled,vignettes_subtotal_minor,processing_fee_minor,flex_amount_minor,registration_country,plate,status&${paidFilter}&${dashboardOrderStatusQuery()}&order=paid_at.asc&limit=5000`, { headers });
   if (!response.ok) throw new Error(`Paid orders API ${response.status}`);
-  const orders = (await response.json() as PaidOrderAnalyticsRow[]).filter(order => !isAnalyticsExcludedPlate(order.plate));
+  const orders = (await response.json() as PaidOrderAnalyticsRow[]).filter(order => isDashboardVisibleOrderStatus(order.status) && !isAnalyticsExcludedPlate(order.plate));
   if (!orders.length) return { orders, vignettes: [] as Array<{ order_id: string }>, tolls: [] as Array<{ order_id: string }> };
   const ids = encodeURIComponent(`(${orders.map(order => order.id).join(",")})`);
   const [vignettesResponse, tollsResponse] = await Promise.all([

@@ -157,7 +157,7 @@ Registrace (pořadí důležité kvůli write policy a auth):
 1. SPA → `GET /api/orders`
 2. Server ověří session
 3. Server čte Supabase přes service role (orders + items + bridge/toll)
-4. Deduplikace / prezentace v API nebo UI (bez DB cleanup zápisů)
+4. Deduplikace / prezentace v API nebo UI (bez DB cleanup zápisů). Stav `test` a testovací SPZ `AAA`/`AAAAA`/… se skryjí při čtení. Stránka Všechny objednávky řadí chronologicky (zaplacené/vytvořené), bez pinování konfliktů.
 5. SPA renderuje dashboard / seznam / detail
 
 ### Ruční FULFILLED
@@ -263,7 +263,7 @@ Navigace: `history.pushState` / `popstate` + `pathForView` / `routeFromPath`.
 
 **Dashboard (`/`):** sloupec objednávek, centrum pozornosti, náhled Redakce a PostHog, živý log.
 
-**Objednávky:** seznam + detail, humanizovaná timeline, ruční FULFILLED, poznámky k položkám, odkazy na screenshoty/doklady.
+**Objednávky:** seznam + detail, humanizovaná timeline, ruční FULFILLED, poznámky k položkám, odkazy na screenshoty/doklady. Karty: dokončená zelená, zpracovává se modrá, selhání červená, Plus tyrkysová, čeká na zpracování žlutá, čeká na platbu šedá, konflikt SPZ oranžová. Dokončená karta s konfliktem zůstává zelená a ukáže jen štítek konfliktu. Archiv `/orders` drží časové pořadí; dokončené objednávky s konfliktem se netopují nahoru.
 
 **Logy:** proxy EGP Worker monitor (technické i humanizované).
 
@@ -319,6 +319,7 @@ EGP DSHBRD/
 | Soubor | Role |
 |--------|------|
 | `src/App.tsx` | Hlavní SPA |
+| `src/order-filters.ts` | Viditelné stavy objednávek a skrytí testovacích SPZ při čtení |
 | `src/styles.css` | Styling |
 | `src/editorial.tsx` | Redakce UI |
 | `vite.config.ts` | API mimo redakci |

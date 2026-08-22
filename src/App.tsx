@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { orders as demoOrders, portalLinks, type Order, type OrderItem, type OrderStatus } from "./data";
 import { EditorialArticleEditor, EditorialHome, EditorialPreview, EditorialSettingsModal } from "./editorial";
+import { isHiddenTestPlate, normalizePlateKey } from "./order-filters";
 import { passageDisplayFromProductCode } from "./passageCatalog";
 
 type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article";
@@ -583,6 +584,17 @@ function previewOrderRank(status: OrderStatus) {
   return 5;
 }
 
+function isActionablePlateConflict(order: Order) {
+  return order.plateCountryConflict === true
+    && Boolean(order.paidAtIso)
+    && order.status !== "fulfilled"
+    && order.status !== "awaiting_payment";
+}
+
+function orderToneClass(order: Order) {
+  return `${order.status}${isActionablePlateConflict(order) ? " plate-conflict" : ""}`;
+}
+
 function shortId(id: string) {
   return `${id.slice(0, 5)}…${id.slice(-4)}`;
 }
@@ -760,13 +772,9 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
   </>;
 }
 
-function normalizePlateKey(value: string) {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
   return (
-    <button className={`order-card ${order.status}${order.plateCountryConflict === true ? " plate-conflict" : ""}`} onClick={onOpen}>
+    <button className={`order-card ${orderToneClass(order)}`} onClick={onOpen}>
       <div className="order-meta"><span>{shortId(order.id)}</span><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span></div>
       <div className="order-primary">
         <div className="plate"><Flag code={order.registrationCode} /><strong>{order.plate}</strong></div>
@@ -793,6 +801,8 @@ function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; op
   const previewOrders = filtered
     .filter(order => Boolean(order.paidAtIso) && order.status !== "awaiting_payment")
     .sort((a, b) => {
+      const conflictRank = Number(isActionablePlateConflict(b)) - Number(isActionablePlateConflict(a));
+      if (conflictRank !== 0) return conflictRank;
       const byRank = previewOrderRank(a.status) - previewOrderRank(b.status);
       if (byRank !== 0) return byRank;
       return Date.parse(b.paidAtIso ?? "") - Date.parse(a.paidAtIso ?? "");
@@ -827,7 +837,7 @@ function PostHogPreview({ onOpen }: { onOpen: () => void }) {
 
 type DashboardIncident = {
   id: string;
-  tone: "error" | "warning";
+  tone: "error" | "warning" | "conflict";
   title: string;
   detail: string;
   orderId?: string;
@@ -884,12 +894,12 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
   const problematic = [...failedByCountry.entries()].sort((a, b) => b[1] - a[1])[0];
   const incidents: DashboardIncident[] = [];
   for (const order of orderData) {
-    if (order.plateCountryConflict === true) {
+    if (isActionablePlateConflict(order)) {
       const conflictDay = pragueDay(order.paidAtIso ?? order.createdAtIso);
       if (conflictDay === today) {
         incidents.push({
           id: `plate-conflict:${order.id}`,
-          tone: "warning",
+          tone: "conflict",
           title: `${order.plate} · konflikt SPZ/země`,
           detail: `Registrace ${order.registrationCountry} se neshoduje s dřívější objednávkou stejné SPZ`,
           orderId: order.id,
@@ -1651,7 +1661,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   return (
     <main className="page-shell">
       <BackButton onClick={back} />
-      <section className={`detail-hero ${order.status}`}>
+      <section className={`detail-hero ${orderToneClass(order)}`}>
         <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p>{order.plus && <span className="plus-badge"><Plus size={13} strokeWidth={3} /> Plus</span>}</div></div>
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
         <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
@@ -1825,13 +1835,7 @@ function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: (
       if (!query) return true;
       return `${order.id}${order.number}${order.plate.replace(/[\s-]/g, "")}${order.email}`.toUpperCase().includes(normalized);
     });
-    return [...matched].sort((a, b) => {
-      const conflictRank = Number(b.plateCountryConflict === true) - Number(a.plateCountryConflict === true);
-      if (conflictRank !== 0 && !onlyConflicts) return conflictRank;
-      const byRank = previewOrderRank(a.status) - previewOrderRank(b.status);
-      if (byRank !== 0) return byRank;
-      return Date.parse(b.paidAtIso ?? b.createdAtIso ?? "") - Date.parse(a.paidAtIso ?? a.createdAtIso ?? "");
-    });
+    return [...matched].sort((a, b) => Date.parse(b.paidAtIso ?? b.createdAtIso ?? "") - Date.parse(a.paidAtIso ?? a.createdAtIso ?? ""));
   }, [normalized, onlyConflicts, orderData, query]);
   const visible = filtered.slice(0, visibleCount);
   const canLoadMore = visible.length < filtered.length;
@@ -2071,8 +2075,9 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
       .then(response => response.ok ? response.json() : Promise.reject())
       .then((payload: { mode: string; data?: Order[] }) => {
         if (payload.mode === "live" && payload.data?.length) {
-          setOrderData(payload.data);
-          setSelectedOrder(current => payload.data?.find(order => order.id === current.id) ?? payload.data![0]);
+          const data = payload.data.filter(order => !isHiddenTestPlate(order.plate));
+          setOrderData(data);
+          setSelectedOrder(current => data.find(order => order.id === current.id) ?? data[0]);
         }
       })
       .catch(() => undefined);

@@ -233,7 +233,7 @@ DNS A, porty 80/443, volume `caddy_data`, CSP vs. browser console.
 1. Rozliš dashboard vs. worker vs. Supabase.
 2. Obchodní data neopravuj mimo FULFILLED.
 3. Restart sidecar: `docker compose -f docker-compose.production.yml restart gmail-ingest`
-4. Žádný DB cleanup „pro pořádek“ — dedup jen v UI (`202607180005`).
+4. Žádný DB cleanup „pro pořádek“ — dedup, skrytí stavu `test` a testovacích SPZ jen při čtení (`202607180005`).
 5. Nové write fixy jen přes kontrakt.
 
 ## Roadmap (zatím ne v produkci)
