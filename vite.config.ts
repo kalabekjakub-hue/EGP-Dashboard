@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { dashboardOrderStatusQuery, isDashboardVisibleOrderStatus, isHiddenTestPlate, normalizePlateKey } from "./src/order-filters";
+import { DEFERRED_TOLL_COLUMNS, DEFERRED_TOLL_COLUMNS_CORE, deferredSignature, mapDeferredToll, type DeferredFamily, type DeferredTollRow } from "./src/deferred-tolls";
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
 import { editorialApi } from "./editorial-api";
@@ -346,22 +347,49 @@ function supabaseReadApi() {
             if (!response.ok) throw new Error(`order_documents API ${response.status}`);
             return response.json() as Promise<Array<{ order_id: string; country_code?: string }>>;
           };
-          const [vignettes, tolls, officialDocuments] = await Promise.all([
+          const loadDeferred = async (table: string, family: DeferredFamily) => {
+            if (!ids.length) return [] as Array<ReturnType<typeof mapDeferredToll>>;
+            const paidColumn = family === "free_flow" ? "fr_paid_at" : "epass24_paid_at";
+            const fetchRows = async (columns: string) => fetch(`${url}/rest/v1/${table}?select=${columns}&order=created_at.asc&order_id=in.${encodedIds}`, { headers });
+            let response = await fetchRows(`${DEFERRED_TOLL_COLUMNS},${paidColumn}`);
+            if (response.status === 400) response = await fetchRows(DEFERRED_TOLL_COLUMNS_CORE);
+            if (response.status === 404) return [] as Array<ReturnType<typeof mapDeferredToll>>;
+            if (!response.ok) throw new Error(`${table} API ${response.status}`);
+            const rows = await response.json() as DeferredTollRow[];
+            return rows.map(row => mapDeferredToll(row, family));
+          };
+          const [vignettes, tolls, officialDocuments, freeFlowItems, epassItems] = await Promise.all([
             loadItems("order_items", vignetteSelect),
             loadItems("order_bridge_toll_items", tollSelect),
             loadOfficialDocuments(),
+            loadDeferred("order_free_flow_items", "free_flow"),
+            loadDeferred("order_epass24_items", "epass24"),
           ]);
           const officialDocumentKeys = new Set(officialDocuments.map(document => `${document.order_id}|${String(document.country_code ?? "").toUpperCase()}`));
           const allItems: RawItem[] = [
             ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
             ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
           ];
-          const itemSignature = (orderId: string) => JSON.stringify(allItems
-            .filter(item => item.order_id === orderId)
-            .map(item => item.source === "order_bridge_toll_items"
-              ? ["toll", item.toll_id ?? "", item.country_code.toUpperCase(), item.pass_count ?? 1, item.pass_date ?? ""]
-              : ["vignette", item.country_code.toUpperCase(), item.validity ?? "", item.start_date ?? "", item.end_date ?? ""])
-            .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
+          const deferredByOrder = new Map<string, Array<ReturnType<typeof mapDeferredToll>>>();
+          for (const item of [...freeFlowItems, ...epassItems]) {
+            const current = deferredByOrder.get(item.orderId) ?? [];
+            current.push(item);
+            deferredByOrder.set(item.orderId, current);
+          }
+          const itemSignature = (orderId: string) => JSON.stringify([
+            ...allItems
+              .filter(item => item.order_id === orderId)
+              .map(item => item.source === "order_bridge_toll_items"
+                ? ["toll", item.toll_id ?? "", item.country_code.toUpperCase(), item.pass_count ?? 1, item.pass_date ?? ""]
+                : ["vignette", item.country_code.toUpperCase(), item.validity ?? "", item.start_date ?? "", item.end_date ?? ""]),
+            ...(deferredByOrder.get(orderId) ?? []).map(item => deferredSignature({
+              id: item.id,
+              order_id: item.orderId,
+              country_code: item.country,
+              product_code: item.itemKind === "free_flow" ? "fr-free-flow" : item.country === "SE" ? "se-free-flow" : "no-free-flow",
+              travel_date: item.travelDate,
+            }, item.itemKind)),
+          ].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))));
           const hiddenPendingIds = new Set<string>();
           const originalPendingCreatedAt = new Map<string, string>();
           const paidOrders = rawOrders.filter(order => Boolean(order.paid_at)).sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at));
@@ -384,7 +412,7 @@ function supabaseReadApi() {
           const data = rawOrders
             .filter(order => !hiddenPendingIds.has(order.id) && isDashboardVisibleOrderStatus(order.status) && !isHiddenTestPlate(order.plate))
             .map(order => {
-            const items = allItems.filter(item => item.order_id === order.id).map(item => {
+            const classicItems = allItems.filter(item => item.order_id === order.id).map(item => {
               const status = itemStatus(item, order.flex_enabled);
               const passage = item.source === "order_bridge_toll_items" ? passageDisplay(item.toll_id) : undefined;
               return {
@@ -414,6 +442,35 @@ function supabaseReadApi() {
                 screenshotsAvailable: Boolean(item.fulfillment_screenshots_meta?.steps?.length),
               };
             });
+            const deferredItems = (deferredByOrder.get(order.id) ?? []).map(item => ({
+              id: item.id,
+              source: item.source,
+              country: item.country,
+              displayCode: item.country,
+              flag: "",
+              product: item.product,
+              itemKind: item.itemKind,
+              validFrom: formatDate(item.travelDate, true),
+              validTo: formatDate(item.travelDate, true),
+              price: item.price,
+              estimate: item.estimate,
+              accrued: item.accrued,
+              fee: item.fee,
+              chargedTotal: item.chargedTotal,
+              status: item.status,
+              deferredStatus: item.deferredStatus,
+              deferredLabel: item.deferredLabel,
+              sectionCount: item.sectionCount,
+              currentStep: item.deferredLabel,
+              invoice: item.status === "fulfilled" ? "ready" as const : "waiting" as const,
+              lastError: item.lastError ?? undefined,
+              createdAtIso: item.createdAt ?? undefined,
+              fulfilledAt: item.fulfilledAt ?? undefined,
+              failedAt: item.failedAt ?? undefined,
+              pdfAvailable: false,
+              screenshotsAvailable: false,
+            }));
+            const items = [...classicItems, ...deferredItems];
             const rawOrderStatus = order.status.toLowerCase().replace(/[\s-]+/g, "_");
             const status = orderStatus(rawOrderStatus, order.fulfillment_status, items);
             const conversionDate = order.paid_at ?? order.created_at;

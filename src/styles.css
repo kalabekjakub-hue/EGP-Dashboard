@@ -696,6 +696,30 @@
 @media(max-width:640px){.editorial-style-modal{padding:10px}.editorial-style-dialog{max-height:calc(100dvh - 20px);padding:24px 18px;border-radius:24px}.editorial-style-close{top:15px;right:15px}.editorial-style-dialog>h2{font-size:24px}.editorial-style-dialog>p{margin-right:42px}.editorial-style-options>button{padding:16px 15px 15px 53px;grid-template-columns:1fr}.editorial-style-options>button>i{top:16px;left:15px}.editorial-style-options em{grid-column:1;grid-row:auto;white-space:normal}.editorial-style-dialog>footer{display:grid;grid-template-columns:1fr 1fr}.editorial-style-dialog>footer button{padding-inline:12px}.editorial-style-dialog>footer .confirm{justify-content:center}}
 
 /* Plate-country conflict ACK — orange, distinct from waiting yellow */
+.price.estimate,.hero-total .estimate-amount,.item-summary .estimate-amount strong,.item-summary .estimate-amount span,.deferred-detail .estimate-amount,.deferred-estimate,.preview-amounts .estimate,.deferred-pair .estimate{color:#d06a12}
+.deferred-pair{display:inline-flex;align-items:baseline;justify-content:flex-end;gap:5px;flex-wrap:wrap}
+.deferred-plus{color:#b9c0ba;font-weight:700}
+.deferred-pair .deferred-plus{font-size:12px}
+.hero-total .deferred-pair{margin-top:8px}
+.hero-total .deferred-pair .price{font-size:26px}
+.hero-total .deferred-pair .price.estimate{font-size:22px}
+.item-preview .preview-amounts{margin-left:auto;display:inline-flex;align-items:baseline;gap:3px;font-weight:700;color:#1c1c1c;white-space:nowrap}
+.item-preview .preview-amounts .deferred-plus{font-size:9px}
+.deferred-estimate{margin-top:4px;font-size:11px;font-weight:700}
+.hero-total .deferred-estimate{font-size:13px}
+.item-card.free_flow,.item-card.epass24{border-color:#c9b8ee}
+.item-card.fulfilled.free_flow,.item-card.fulfilled.epass24{border-color:#8fda96}
+.item-card.failed.free_flow,.item-card.failed.epass24{border-color:#f0aaa7}
+.order-card.deferred,.detail-hero.deferred{border-color:#7b6bb8;background:#f4f0fb}
+.order-card.deferred.plate-conflict,.detail-hero.deferred.plate-conflict{border-color:#e36b1a;background:#f4f0fb}
+.order-card.split,.detail-hero.split{border-color:transparent;background-color:transparent;background-image:linear-gradient(90deg,var(--split-left) 0%,var(--split-left) 32%,var(--split-right) 68%,var(--split-right) 100%),linear-gradient(90deg,var(--split-edge-left) 0%,var(--split-edge-left) 32%,var(--split-edge-right) 68%,var(--split-edge-right) 100%);background-origin:padding-box,border-box;background-clip:padding-box,border-box}
+.order-card.split.plate-conflict,.detail-hero.split.plate-conflict{box-shadow:inset 0 0 0 2px #e36b1a}
+.deferred-detail{grid-template-columns:repeat(4,minmax(0,1fr))}
+.deferred-detail>div{display:flex;flex-direction:column;gap:4px}
+.deferred-detail small{color:var(--muted);font-size:11px}
+.deferred-detail strong{font-size:15px}
+.deferred-detail .error-summary{grid-column:1/-1}
+@media(max-width:760px){.deferred-detail{grid-template-columns:1fr 1fr}}
 .order-card.plate-conflict{border-color:#e36b1a;background:linear-gradient(160deg,#fff8f1,#ffedd5)}
 .order-card.fulfilled.plate-conflict{border-color:#5ad162;background:#e9f9ea}
 .plate-conflict-chip{margin:0 0 8px;padding:5px 9px;border-radius:999px;background:#ffd7b0;color:#9a3f0a;display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700}

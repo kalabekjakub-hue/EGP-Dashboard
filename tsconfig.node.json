@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "server.ts", "server-config.ts", "editorial-api.ts", "editorial-worker.ts", "mail-ingest.ts", "order-export-api.ts", "src/passageCatalog.ts", "src/editorial-versioning.ts", "src/order-filters.ts"]
+  "include": ["vite.config.ts", "server.ts", "server-config.ts", "editorial-api.ts", "editorial-worker.ts", "mail-ingest.ts", "order-export-api.ts", "src/passageCatalog.ts", "src/editorial-versioning.ts", "src/order-filters.ts", "src/deferred-tolls.ts"]
 }

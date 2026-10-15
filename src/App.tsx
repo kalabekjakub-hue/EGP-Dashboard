@@ -29,6 +29,7 @@ import { orders as demoOrders, portalLinks, type Order, type OrderItem, type Ord
 import { EditorialArticleEditor, EditorialHome, EditorialPreview, EditorialSettingsModal } from "./editorial";
 import { isHiddenTestPlate, normalizePlateKey } from "./order-filters";
 import { passageDisplayFromProductCode } from "./passageCatalog";
+import { ACCOUNT_WAITING_LABEL, cardHalves, type CardHalf } from "./deferred-tolls";
 
 type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article";
 
@@ -590,8 +591,35 @@ function isActionablePlateConflict(order: Order) {
     && order.status !== "awaiting_payment";
 }
 
-function orderToneClass(order: Order) {
-  return `${order.status}${isActionablePlateConflict(order) ? " plate-conflict" : ""}`;
+const HALF_PAINT: Record<CardHalf, { fill: string; edge: string }> = {
+  waiting: { fill: "#fff9e8", edge: "#e4bd52" },
+  processing: { fill: "#f1f5ff", edge: "#6f94ef" },
+  plus: { fill: "#eefaf9", edge: "#2aa8a4" },
+  failed: { fill: "#fff1f0", edge: "#eb8581" },
+  fulfilled: { fill: "#e9f9ea", edge: "#5ad162" },
+  deferred: { fill: "#f4f0fb", edge: "#7b6bb8" },
+};
+
+function orderSurface(order: Order): { className: string; style?: CSSProperties } {
+  const conflict = isActionablePlateConflict(order) ? " plate-conflict" : "";
+  if (order.status === "awaiting_payment") return { className: `awaiting_payment${conflict}` };
+  const { classic, account } = cardHalves(order.items.map(item => ({ deferred: isDeferredItem(item), status: item.status })));
+  if (!account) return { className: `${order.status}${conflict}` };
+  if (!classic || (classic === "fulfilled" && account === "fulfilled")) {
+    const tone = !classic && account === "deferred" ? "deferred" : !classic ? account : "fulfilled";
+    return { className: `${tone}${conflict}` };
+  }
+  const left = HALF_PAINT[classic];
+  const right = HALF_PAINT[account];
+  return {
+    className: `split${conflict}`,
+    style: {
+      "--split-left": left.fill,
+      "--split-edge-left": left.edge,
+      "--split-right": right.fill,
+      "--split-edge-right": right.edge,
+    } as CSSProperties,
+  };
 }
 
 function shortId(id: string) {
@@ -609,6 +637,105 @@ function profitMoney(order: Order) {
 
 function orderMoney(order: Order) {
   return money(order.totalEur ?? order.total);
+}
+
+function isDeferredItem(item: OrderItem) {
+  return item.itemKind === "free_flow" || item.itemKind === "epass24";
+}
+
+function isFulfillableItem(item: OrderItem) {
+  return item.source === "order_items" || item.source === "order_bridge_toll_items";
+}
+
+const deferredStatusRank: Record<string, number> = {
+  charge_failed: 0,
+  fr_pay_failed: 0,
+  epass24_pay_failed: 0,
+  debt_missing: 1,
+  charging: 2,
+  paying_fr: 2,
+  paying_epass24: 2,
+  charge_scheduled: 3,
+  charged: 3,
+  debt_found: 4,
+  debt_pending_retry: 5,
+  awaiting_debt: 6,
+  card_saved: 7,
+  awaiting_setup: 8,
+  canceled: 9,
+  debt_zero: 10,
+  fulfilled: 11,
+};
+
+function leadingDeferredItem(order: Order) {
+  const items = order.items.filter(isDeferredItem);
+  if (!items.length) return undefined;
+  return [...items].sort((left, right) => (deferredStatusRank[left.deferredStatus ?? ""] ?? 6) - (deferredStatusRank[right.deferredStatus ?? ""] ?? 6))[0];
+}
+
+function classicDrivesStatus(order: Order) {
+  return order.items.some(item => !isDeferredItem(item) && (item.status === "waiting" || item.status === "processing" || item.status === "plus" || item.status === "failed"));
+}
+
+function orderStatusText(order: Order) {
+  if (order.status === "awaiting_payment" || order.status === "plus" || classicDrivesStatus(order)) return statusLabels[order.status];
+  const lead = leadingDeferredItem(order);
+  if (lead?.deferredLabel && (order.status === "waiting" || order.status === "processing" || order.status === "failed" || lead.deferredStatus === "debt_zero")) return lead.deferredLabel;
+  return statusLabels[order.status];
+}
+
+function accountStillOpen(order: Order) {
+  return order.items.some(item => isDeferredItem(item) && item.status !== "fulfilled" && item.status !== "failed");
+}
+
+function orderStatusTag(order: Order) {
+  if (accountStillOpen(order) && order.status !== "failed" && order.status !== "awaiting_payment" && order.status !== "fulfilled") {
+    return { text: ACCOUNT_WAITING_LABEL, tone: "waiting" };
+  }
+  return { text: orderStatusText(order), tone: order.status };
+}
+
+function deferredHeld(item: OrderItem) {
+  return item.chargedTotal ?? item.accrued ?? null;
+}
+
+function deferredHeadline(order: Order) {
+  const items = order.items.filter(isDeferredItem);
+  const checkout = order.totalEur ?? order.total;
+  const hasClassic = order.items.some(item => !isDeferredItem(item));
+  if (!items.length || (hasClassic && checkout > 0)) return null;
+  let estimate = 0;
+  let estimateKnown = false;
+  let held = 0;
+  let heldKnown = false;
+  let fee = 0;
+  let feeKnown = false;
+  for (const item of items) {
+    if (item.estimate != null) {
+      estimate += item.estimate;
+      estimateKnown = true;
+    }
+    const heldValue = deferredHeld(item);
+    if (heldValue != null) {
+      held += heldValue;
+      heldKnown = true;
+    }
+    if (item.fee != null) {
+      fee += item.fee;
+      feeKnown = true;
+    }
+  }
+  if (!estimateKnown && !heldKnown) return null;
+  return {
+    estimate: estimateKnown ? estimate : null,
+    held: heldKnown ? held : null,
+    fee: feeKnown ? fee : null,
+  };
+}
+
+function DeferredAmounts({ held }: { held: number | null }) {
+  if (held == null) return null;
+  return <strong className="price">{money(held)}</strong>;
 }
 
 function vehicleLabel(value?: string) {
@@ -772,23 +899,37 @@ function Header({ goHome, navigate, onClearAttention, onLogout }: { goHome: () =
 }
 
 function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
+  const headline = deferredHeadline(order);
+  const surface = orderSurface(order);
+  const statusTag = orderStatusTag(order);
+  const liveItem = order.items.find(item => item.status === "processing" && !isDeferredItem(item));
   return (
-    <button className={`order-card ${orderToneClass(order)}`} onClick={onOpen}>
-      <div className="order-meta"><span>{shortId(order.id)}</span><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span></div>
+    <button className={`order-card ${surface.className}`} style={surface.style} onClick={onOpen}>
+      <div className="order-meta"><span>{shortId(order.id)}</span><span className={`status-tag ${statusTag.tone}`}>{statusTag.text}</span></div>
       <div className="order-primary">
         <div className="plate"><Flag code={order.registrationCode} /><strong>{order.plate}</strong></div>
         <div className="price-summary">
-          <strong className="price">{orderMoney(order)}</strong>
-          <small className="profit">({profitMoney(order)})</small>
+          {headline ? headline.held != null ? <DeferredAmounts held={headline.held} /> : <strong className="price">—</strong> : <strong className="price">{orderMoney(order)}</strong>}
+          {headline ? headline.fee != null ? <small className="profit">({money(headline.fee)})</small> : null : <small className="profit">({profitMoney(order)})</small>}
         </div>
       </div>
       {order.plateCountryConflict === true && <div className="plate-conflict-chip"><TriangleAlert size={12} />Konflikt SPZ/země</div>}
       <div className="item-preview">
-        {order.items.map((item) => <div key={item.id ?? `${item.source}-${item.country}-${item.product}`}><Flag code={item.country} /><b>{item.product}</b><span>{item.displayCode ?? item.country}</span></div>)}
+        {order.items.map((item) => {
+          const held = isDeferredItem(item) ? deferredHeld(item) : null;
+          return (
+            <div key={item.id ?? `${item.source}-${item.country}-${item.product}`}>
+              <Flag code={item.country} />
+              <b>{item.product}</b>
+              <span>{item.displayCode ?? item.country}</span>
+              {held != null && <span className="preview-amounts">{money(held)}</span>}
+            </div>
+          );
+        })}
       </div>
       {order.status === "awaiting_payment" && <div className="awaiting-created"><Clock3 size={12} />Vytvořeno {order.createdAt}</div>}
       {order.status === "plus" && <div className="plus-line"><Plus size={12} strokeWidth={3} />Čeká na T−15</div>}
-      {order.status === "processing" && <div className="processing-line"><span className="live-pulse" />{order.items.find(i => i.status === "processing")?.country} · {order.items.find(i => i.status === "processing")?.currentStep}</div>}
+      {liveItem && <div className="processing-line"><span className="live-pulse" />{liveItem.country} · {liveItem.currentStep}</div>}
     </button>
   );
 }
@@ -907,7 +1048,11 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
     }
     for (const item of order.items) {
       const prefix = `${item.country} · ${order.plate}`;
-      if (item.status === "failed" && pragueDay(item.failedAt) === today) incidents.push({ id: `failed:${order.id}:${item.country}`, tone: "error", title: `${prefix} selhalo`, detail: item.lastError || "Položka skončila chybou", orderId: order.id });
+      if (isDeferredItem(item)) {
+        if (item.status === "failed" && pragueDay(item.failedAt ?? item.createdAtIso) === today) incidents.push({ id: `deferred-failed:${order.id}:${item.id ?? item.country}`, tone: "error", title: `${item.product} · ${order.plate} selhalo`, detail: item.lastError || item.deferredLabel || "Odložené mýto skončilo chybou", orderId: order.id });
+        continue;
+      }
+      if (item.status === "failed" && pragueDay(item.failedAt) === today) incidents.push({ id: `failed:${order.id}:${item.country}`, tone: "error", title: `${item.country} · ${order.plate} selhalo`, detail: item.lastError || "Položka skončila chybou", orderId: order.id });
       if (order.paidAtIso && pragueDay(order.paidAtIso) === today && item.status === "waiting" && !item.engineSubmittedAt && minutesSince(order.paidAtIso) > 5) incidents.push({ id: `unclaimed:${order.id}:${item.country}`, tone: "warning", title: `${prefix} čeká na worker`, detail: "Zaplaceno, ale položka nebyla převzata", orderId: order.id });
       if (order.paidAtIso && pragueDay(order.paidAtIso) === today && item.status === "processing" && !item.engineSubmittedAt && minutesSince(order.paidAtIso) > 5) incidents.push({ id: `unclaimed:${order.id}:${item.country}`, tone: "warning", title: `${prefix} čeká na worker`, detail: "Ve frontě, ale položka nebyla převzata", orderId: order.id });
       if (item.status === "processing" && item.engineSubmittedAt && pragueDay(item.engineSubmittedAt) === today && minutesSince(item.engineSubmittedAt) > 15) incidents.push({ id: `slow:${order.id}:${item.country}`, tone: "warning", title: `${prefix} trvá dlouho`, detail: `Zpracování běží ${Math.round(minutesSince(item.engineSubmittedAt))} minut`, orderId: order.id });
@@ -927,7 +1072,7 @@ function buildDashboardOverview(orderData: Order[], workers: WorkersStatus | nul
     waiting: Math.max(0, todayOrders.length - completed - failed),
     averageDuration: durations.length ? durations.reduce((sum, value) => sum + value, 0) / durations.length : 0,
     problematicCountry: problematic?.[0] ?? "–",
-    missingDocuments: todayItems.filter(({ item }) => item.status === "fulfilled" && item.pdfAvailable === false).length,
+    missingDocuments: todayItems.filter(({ item }) => !isDeferredItem(item) && item.status === "fulfilled" && item.pdfAvailable === false).length,
     incidents,
   };
 }
@@ -1490,6 +1635,9 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const [ackOpen, setAckOpen] = useState(false);
   const [ackState, setAckState] = useState<"idle" | "saving" | "error">("idle");
   const [exportState, setExportState] = useState<"idle" | "bundle" | "summary" | "customer" | "error">("idle");
+  const headline = deferredHeadline(order);
+  const surface = orderSurface(order);
+  const statusTag = orderStatusTag(order);
 
   useEffect(() => { setExportState("idle"); }, [order.id]);
 
@@ -1687,10 +1835,10 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   return (
     <main className="page-shell">
       <BackButton onClick={back} />
-      <section className={`detail-hero ${orderToneClass(order)}`}>
+      <section className={`detail-hero ${surface.className}`} style={surface.style}>
         <div className="hero-plate"><Flag code={order.registrationCode} large /><div><small>{shortId(order.id)}</small><h1>{order.plate}</h1><p>{order.registrationCountry}</p>{order.plus && <span className="plus-badge"><Plus size={13} strokeWidth={3} /> Plus</span>}</div></div>
         <div className="hero-data"><div><small>E-mail zákazníka</small><strong>{order.email}</strong></div><div><small>Číslo objednávky</small><strong>{order.number}</strong></div><div><small>Vytvořeno</small><strong>{order.createdAt}</strong></div><div><small>Typ vozidla</small><strong>{vehicleLabel(order.vehicleType)}</strong></div><div><small>Typ paliva</small><strong>{fuelLabel(order.fuelType)}</strong></div>{order.vin && <div><small>VIN</small><strong>{order.vin}</strong></div>}</div>
-        <div className="hero-total"><span className={`status-tag ${order.status}`}>{statusLabels[order.status]}</span><strong>{orderMoney(order)}</strong><small className="hero-profit">({profitMoney(order)})</small><small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
+        <div className="hero-total"><span className={`status-tag ${statusTag.tone}`}>{statusTag.text}</span>{headline ? headline.held != null ? <DeferredAmounts held={headline.held} /> : <strong>—</strong> : <strong>{orderMoney(order)}</strong>}{headline ? headline.fee != null ? <small className="hero-profit">({money(headline.fee)})</small> : null : <small className="hero-profit">({profitMoney(order)})</small>}<small className="paid-at">Zaplaceno {order.paidAt}</small>{order.originalPendingCreatedAt && <small className="original-pending-created">Vytvořeno {order.originalPendingCreatedAt}</small>}</div>
         <div className="hero-actions">
           <button type="button" onClick={() => void downloadExport("bundle")} disabled={exportBusy}>
             <Download size={16} /> {exportState === "bundle" ? "Připravuji…" : "Stáhnout vše"}
@@ -1733,22 +1881,37 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
         </section>
       )}
       <section className="items-section">
-        <div className="section-heading"><div><span className="eyebrow">Obsah objednávky</span><h2>Známky, mosty a placené úseky</h2></div><span className="count">{order.items.length}</span></div>
+        <div className="section-heading"><div><span className="eyebrow">Obsah objednávky</span><h2>Položky</h2></div><span className="count">{order.items.length}</span></div>
         {order.items.map(item => {
-          const timeline = buildItemTimeline(order.id, item, orderLogs);
+          const deferred = isDeferredItem(item);
+          const timeline = deferred ? [] : buildItemTimeline(order.id, item, orderLogs);
           const itemKey = item.id ?? `${item.source}-${item.country}-${item.product}`;
-          const dateLabel = item.itemKind && item.itemKind !== "vignette" ? `Průjezd ${item.validFrom}` : `${item.validFrom} – ${item.validTo}`;
+          const dateLabel = deferred
+            ? `Cesta ${item.validFrom}${item.sectionCount ? ` · ${item.sectionCount} ${item.sectionCount === 1 ? "úsek" : item.sectionCount < 5 ? "úseky" : "úseků"}` : ""}`
+            : item.itemKind && item.itemKind !== "vignette" ? `Průjezd ${item.validFrom}` : `${item.validFrom} – ${item.validTo}`;
           const itemNote = noteTextForItem(item.id);
-          return <article className={`item-card ${item.status}`} key={itemKey}>
+          const priceLabel = deferred
+            ? item.chargedTotal != null ? "strženo" : item.accrued != null ? "naběhlo" : "čeká na dluh"
+            : item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.duration ?? "Čeká";
+          const priceValue = deferred ? deferredHeld(item) : item.price;
+          const accountOpen = deferred && item.status !== "failed" && item.status !== "fulfilled";
+          return <article className={`item-card ${item.status}${deferred ? ` ${item.itemKind}` : ""}`} key={itemKey}>
             <button className="item-summary" onClick={() => setExpanded(expanded === itemKey ? "" : itemKey)}>
               <span className="country-flag"><Flag code={item.country} /></span>
               <div><strong>{item.product} · {item.displayCode ?? item.country}</strong><span>{dateLabel}</span></div>
               <div className={`item-note-slot${itemNote ? " has-note" : ""}`}>{itemNote || ""}</div>
-              <div><strong>{money(item.price)}</strong><span>{item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.duration ?? "Čeká"}</span></div>
-              <span className={`status-tag ${item.status}`}>{statusLabels[item.status]}</span>
+              <div><strong>{priceValue == null ? "—" : money(priceValue)}</strong><span>{priceLabel}</span></div>
+              <span className={`status-tag ${accountOpen ? "waiting" : item.status}`}>{accountOpen ? ACCOUNT_WAITING_LABEL : item.deferredLabel ?? statusLabels[item.status]}</span>
               {expanded === itemKey ? <ChevronDown /> : <ChevronRight />}
             </button>
-            {expanded === itemKey && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{item.status === "failed" && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený.</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
+            {expanded === itemKey && deferred && <div className="item-detail deferred-detail">
+              <div><small>Odhad z košíku</small><strong>{item.estimate == null ? "—" : money(item.estimate)}</strong></div>
+              <div><small>Naběhlý dluh</small><strong>{item.accrued == null ? "zatím není" : money(item.accrued)}</strong></div>
+              <div><small>Poplatek</small><strong>{item.fee == null ? "—" : money(item.fee)}</strong></div>
+              <div><small>Strženo zákazníkovi</small><strong>{item.chargedTotal == null ? "—" : money(item.chargedTotal)}</strong></div>
+              {item.lastError && <div className="error-summary"><strong>{item.lastError}</strong></div>}
+            </div>}
+            {expanded === itemKey && !deferred && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{item.status === "failed" && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený.</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
           </article>;
         })}
       </section>
@@ -1772,9 +1935,9 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
             <button className="manual-fulfill-close" onClick={() => setFulfillOpen(false)} aria-label="Zavřít"><X size={18} /></button>
             <span className="manual-fulfill-icon"><CheckCircle2 size={22} /></span>
             <h2 id="manual-fulfill-title">Označit jako FULFILLED</h2>
-            <p>Vyber jednu nebo více položek. Plus vpravo přidá poznámku k položce.</p>
+            <p>{order.items.some(isFulfillableItem) ? "Vyber jednu nebo více položek. Plus vpravo přidá poznámku k položce." : "Tahle objednávka má jen Free-Flow nebo EPASS24. Ty se tady ručně neoznačují."}</p>
             <div className="manual-country-list">
-              {order.items.map(item => {
+              {order.items.filter(isFulfillableItem).map(item => {
                 const selected = Boolean(item.id && fulfillItemIds.includes(item.id));
                 return (
                   <div className="manual-country-row" key={item.id ?? `${item.source}-${item.country}-${item.product}`}>

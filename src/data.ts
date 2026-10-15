@@ -2,12 +2,19 @@ export type OrderStatus = "awaiting_payment" | "plus" | "waiting" | "processing"
 
 export type OrderItem = {
   id?: string;
-  source?: "order_items" | "order_bridge_toll_items";
+  source?: "order_items" | "order_bridge_toll_items" | "order_free_flow_items" | "order_epass24_items";
   country: string;
   displayCode?: string;
   flag: string;
   product: string;
-  itemKind?: "vignette" | "bridge" | "tunnel" | "toll_section";
+  itemKind?: "vignette" | "bridge" | "tunnel" | "toll_section" | "free_flow" | "epass24";
+  estimate?: number | null;
+  accrued?: number | null;
+  fee?: number | null;
+  chargedTotal?: number | null;
+  deferredStatus?: string;
+  deferredLabel?: string;
+  sectionCount?: number;
   validFrom: string;
   validTo: string;
   price: number;
@@ -57,6 +64,149 @@ export type Order = {
 };
 
 export const orders: Order[] = [
+  {
+    id: "f1e2d3c4-b5a6-4789-90ab-cdef12345678",
+    number: "EGP-2026-1015-2201",
+    plate: "6FF 2468",
+    registrationCountry: "Česko",
+    registrationCode: "cz",
+    email: "petra.free@example.com",
+    createdAt: "15. 10. 2026, 09:12",
+    paidAt: "15. 10. 2026, 09:13",
+    paidAtIso: "2026-10-15T07:13:00.000Z",
+    createdAtIso: "2026-10-15T07:12:00.000Z",
+    total: 0,
+    plus: false,
+    locale: "cs-CZ",
+    status: "processing",
+    items: [
+      {
+        id: "ff-item-1",
+        source: "order_free_flow_items",
+        country: "FR",
+        displayCode: "FR",
+        flag: "",
+        product: "Francie Free-Flow",
+        itemKind: "free_flow",
+        validFrom: "12. 10. 2026",
+        validTo: "12. 10. 2026",
+        price: 18.2,
+        estimate: 14.5,
+        accrued: 18.2,
+        fee: null,
+        chargedTotal: null,
+        status: "processing",
+        deferredStatus: "debt_found",
+        deferredLabel: "Čeká se na dluh",
+        sectionCount: 2,
+        currentStep: "Čeká se na dluh",
+        invoice: "waiting",
+      },
+    ],
+  },
+  {
+    id: "a9b8c7d6-e5f4-4321-abcd-0987654321ab",
+    number: "EGP-2026-1014-1844",
+    plate: "7EE 1357",
+    registrationCountry: "Německo",
+    registrationCode: "de",
+    email: "lars.epass@example.com",
+    createdAt: "14. 10. 2026, 16:40",
+    paidAt: "14. 10. 2026, 16:41",
+    paidAtIso: "2026-10-14T14:41:00.000Z",
+    createdAtIso: "2026-10-14T14:40:00.000Z",
+    total: 0,
+    plus: false,
+    locale: "de-DE",
+    status: "waiting",
+    items: [
+      {
+        id: "ep-item-1",
+        source: "order_epass24_items",
+        country: "NO",
+        displayCode: "NO",
+        flag: "",
+        product: "Norsko EPASS24",
+        itemKind: "epass24",
+        validFrom: "2. 10. 2026",
+        validTo: "2. 10. 2026",
+        price: 22,
+        estimate: 22,
+        accrued: null,
+        fee: null,
+        chargedTotal: null,
+        status: "waiting",
+        deferredStatus: "awaiting_debt",
+        deferredLabel: "Čeká se na dluh",
+        sectionCount: 4,
+        currentStep: "Čeká se na dluh",
+        invoice: "waiting",
+      },
+      {
+        id: "ep-item-2",
+        source: "order_epass24_items",
+        country: "SE",
+        displayCode: "SE",
+        flag: "",
+        product: "Švédsko EPASS24",
+        itemKind: "epass24",
+        validFrom: "3. 10. 2026",
+        validTo: "3. 10. 2026",
+        price: 9.4,
+        estimate: 8,
+        accrued: 8.5,
+        fee: 0.9,
+        chargedTotal: 9.4,
+        status: "fulfilled",
+        deferredStatus: "fulfilled",
+        deferredLabel: "Hotovo",
+        sectionCount: 1,
+        currentStep: "Hotovo",
+        invoice: "ready",
+      },
+    ],
+  },
+  {
+    id: "c0ffee00-1111-4abc-9def-0123456789ab",
+    number: "EGP-2026-1015-2310",
+    plate: "8GG 4242",
+    registrationCountry: "Česko",
+    registrationCode: "cz",
+    email: "mix.flow@example.com",
+    createdAt: "15. 10. 2026, 11:02",
+    paidAt: "15. 10. 2026, 11:03",
+    paidAtIso: "2026-10-15T09:03:00.000Z",
+    createdAtIso: "2026-10-15T09:02:00.000Z",
+    total: 9.3,
+    plus: false,
+    locale: "cs-CZ",
+    status: "waiting",
+    items: [
+      { country: "AT", flag: "🇦🇹", product: "10denní známka", validFrom: "16. 10. 2026", validTo: "25. 10. 2026", price: 9.3, status: "fulfilled", duration: "41 s", reference: "AT-441902", invoice: "ready" },
+      {
+        id: "ff-item-mix",
+        source: "order_free_flow_items",
+        country: "FR",
+        displayCode: "FR",
+        flag: "",
+        product: "Francie Free-Flow",
+        itemKind: "free_flow",
+        validFrom: "16. 10. 2026",
+        validTo: "16. 10. 2026",
+        price: 0,
+        estimate: 11,
+        accrued: null,
+        fee: null,
+        chargedTotal: null,
+        status: "waiting",
+        deferredStatus: "awaiting_debt",
+        deferredLabel: "Čeká se na dluh",
+        sectionCount: 1,
+        currentStep: "Čeká se na dluh",
+        invoice: "waiting",
+      },
+    ],
+  },
   {
     id: "a1b2c3d4-e5f6-7890-abcd-1234ef567890",
     number: "EGP-2026-0712-1842",

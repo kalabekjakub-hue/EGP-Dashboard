@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import JSZip from "jszip";
+import { DEFERRED_TOLL_COLUMNS, DEFERRED_TOLL_COLUMNS_CORE, deferredDashboardStatus, deferredProductName, deferredStatusLabel, minorToEuros, type DeferredFamily, type DeferredTollRow } from "./src/deferred-tolls";
 import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
 
@@ -73,7 +74,13 @@ type RawItem = {
   toll_id?: string;
   pass_count?: number;
   pass_date?: string;
-  source?: "order_items" | "order_bridge_toll_items";
+  source?: "order_items" | "order_bridge_toll_items" | "order_free_flow_items" | "order_epass24_items";
+  estimated_eur_minor?: number | null;
+  actual_debt_eur_minor?: number | null;
+  processing_fee_eur_minor?: number | null;
+  charged_total_eur_minor?: number | null;
+  travel_date?: string;
+  section_ids?: string[] | null;
 };
 
 type OfficialDocument = {
@@ -215,6 +222,13 @@ const PASSAGE_EN: Record<string, string> = {
 };
 
 function itemProductEn(item: RawItem) {
+  if (item.source === "order_free_flow_items") return "France Free-Flow";
+  if (item.source === "order_epass24_items") {
+    const code = (item.country_code ?? "").toUpperCase();
+    if (code === "SE") return "Sweden EPASS24";
+    if (code === "NO") return "Norway EPASS24";
+    return "EPASS24";
+  }
   if (item.source === "order_bridge_toll_items") {
     const key = (item.toll_id ?? "").trim().toLowerCase();
     const name = PASSAGE_EN[key] ?? passageDisplay(item.toll_id).name;
@@ -225,6 +239,7 @@ function itemProductEn(item: RawItem) {
 }
 
 function itemStartDate(item: RawItem) {
+  if (item.source === "order_free_flow_items" || item.source === "order_epass24_items") return item.travel_date;
   return item.source === "order_bridge_toll_items" ? item.pass_date : item.start_date;
 }
 
@@ -277,13 +292,45 @@ async function loadOrderBundle(orderId: string): Promise<OrderBundle | null> {
   const vignetteSelect = "id,order_id,country_code,validity,start_date,end_date,price_eur_minor,status,created_at,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,plate_country_conflict,fulfillment_screenshots_meta";
   const tollSelect = "id,order_id,toll_id,country_code,pass_count,pass_date,price_eur_minor,status,created_at,fulfilled_at,failed_at,last_error,engine_submitted_at,state_reference,pdf_storage_path,plate_country_conflict,fulfillment_screenshots_meta";
   const encodedId = encodeURIComponent(orderId);
-  const [vignettes, tolls, official, notes, acks, audits] = await Promise.all([
+  const loadDeferred = async (table: string, family: DeferredFamily) => {
+    const paidColumn = family === "free_flow" ? "fr_paid_at" : "epass24_paid_at";
+    const primary = await fetch(`${url}/rest/v1/${table}?select=${DEFERRED_TOLL_COLUMNS},${paidColumn}&order_id=eq.${encodedId}&order=created_at.asc`, { headers: supabaseHeaders(key) });
+    const response = primary.status === 400
+      ? await fetch(`${url}/rest/v1/${table}?select=${DEFERRED_TOLL_COLUMNS_CORE}&order_id=eq.${encodedId}&order=created_at.asc`, { headers: supabaseHeaders(key) })
+      : primary;
+    if (response.status === 404) return [] as RawItem[];
+    if (!response.ok) throw new Error(`${table} API ${response.status}`);
+    const rows = await response.json() as DeferredTollRow[];
+    return rows.map(row => {
+      const mapped = {
+        id: row.id,
+        order_id: row.order_id,
+        country_code: (row.country_code || (family === "free_flow" ? "FR" : "")).toUpperCase(),
+        price_eur_minor: row.charged_total_eur_minor ?? row.actual_debt_eur_minor ?? row.estimated_eur_minor ?? 0,
+        status: row.status ?? "",
+        created_at: row.created_at ?? undefined,
+        fulfilled_at: row.fr_paid_at ?? row.epass24_paid_at ?? undefined,
+        last_error: row.last_error ?? undefined,
+        travel_date: row.travel_date ?? undefined,
+        section_ids: row.section_ids,
+        estimated_eur_minor: row.estimated_eur_minor,
+        actual_debt_eur_minor: row.actual_debt_eur_minor,
+        processing_fee_eur_minor: row.processing_fee_eur_minor,
+        charged_total_eur_minor: row.charged_total_eur_minor,
+        source: family === "free_flow" ? "order_free_flow_items" as const : "order_epass24_items" as const,
+      };
+      return mapped;
+    });
+  };
+  const [vignettes, tolls, official, notes, acks, audits, freeFlowItems, epassItems] = await Promise.all([
     fetchJson<RawItem[]>(url, key, `order_items?select=${vignetteSelect}&order_id=eq.${encodedId}&order=created_at.asc`),
     fetchJson<RawItem[]>(url, key, `order_bridge_toll_items?select=${tollSelect}&order_id=eq.${encodedId}&order=created_at.asc`),
     fetchJson<OfficialDocument[]>(url, key, `order_documents?select=id,filename,content_type,storage_bucket,storage_path,country_code,document_type&order_id=eq.${encodedId}&order=created_at.asc`),
     fetchOptional<ItemNote[]>(url, key, `dashboard_order_item_notes?select=item_id,item_source,country_code,actor_email,body,created_at&order_id=eq.${encodedId}&order=created_at.desc`, []),
     fetchOptional<ConflictAck[]>(url, key, `dashboard_plate_country_conflict_acks?select=actor_email,previous_value,created_at&order_id=eq.${encodedId}&order=created_at.desc`, []),
     fetchOptional<ManualAudit[]>(url, key, `manual_fulfillment_audit?select=item_id,item_source,country_code,actor_email,previous_status,note,created_at&order_id=eq.${encodedId}&order=created_at.desc`, []),
+    loadDeferred("order_free_flow_items", "free_flow"),
+    loadDeferred("order_epass24_items", "epass24"),
   ]);
   return {
     url,
@@ -292,6 +339,8 @@ async function loadOrderBundle(orderId: string): Promise<OrderBundle | null> {
     items: [
       ...vignettes.map(item => ({ ...item, source: "order_items" as const })),
       ...tolls.map(item => ({ ...item, source: "order_bridge_toll_items" as const })),
+      ...freeFlowItems,
+      ...epassItems,
     ],
     official,
     notes,
@@ -300,7 +349,16 @@ async function loadOrderBundle(orderId: string): Promise<OrderBundle | null> {
   };
 }
 
+function isDeferredSource(source?: string): source is "order_free_flow_items" | "order_epass24_items" {
+  return source === "order_free_flow_items" || source === "order_epass24_items";
+}
+
+function deferredFamily(source?: string): DeferredFamily {
+  return source === "order_epass24_items" ? "epass24" : "free_flow";
+}
+
 function itemProduct(item: RawItem) {
+  if (isDeferredSource(item.source)) return deferredProductName(deferredFamily(item.source), item.country_code);
   if (item.source === "order_bridge_toll_items") {
     const passage = passageDisplay(item.toll_id);
     const count = (item.pass_count ?? 1) > 1 ? ` · ${item.pass_count} průjezdy` : "";
@@ -397,7 +455,7 @@ class TechSheet {
 
 function renderTechnicalPdf(bundle: OrderBundle) {
   const { order, items, official, notes, acks, audits } = bundle;
-  const mapped = items.map(item => ({ item, ui: itemStatus(item, order.flex_enabled) }));
+  const mapped = items.map(item => ({ item, ui: isDeferredSource(item.source) ? deferredDashboardStatus(item.status) : itemStatus(item, order.flex_enabled) }));
   const uiStatus = orderUiStatus(order.status.toLowerCase().replace(/[\s-]+/g, "_"), order.fulfillment_status, mapped.map(entry => ({ status: entry.ui })));
   const currency = order.currency || "EUR";
   const generatedAt = new Date().toISOString();
@@ -470,7 +528,15 @@ function renderTechnicalPdf(bundle: OrderBundle) {
       sheet.kv("item_id", item.id);
       sheet.kv("country_code", item.country_code);
       sheet.kv("product", itemProduct(item));
-      if (item.source === "order_bridge_toll_items") {
+      if (isDeferredSource(item.source)) {
+        sheet.kv("travel_date", item.travel_date);
+        sheet.kv("section_ids", (item.section_ids ?? []).join(", "));
+        sheet.kv("estimated_eur_minor", item.estimated_eur_minor == null ? "—" : `${item.estimated_eur_minor}  (${money(minorToEuros(item.estimated_eur_minor) ?? 0, currency)})`);
+        sheet.kv("actual_debt_eur_minor", item.actual_debt_eur_minor == null ? "—" : `${item.actual_debt_eur_minor}  (${money(minorToEuros(item.actual_debt_eur_minor) ?? 0, currency)})`);
+        sheet.kv("processing_fee_eur_minor", item.processing_fee_eur_minor == null ? "—" : `${item.processing_fee_eur_minor}  (${money(minorToEuros(item.processing_fee_eur_minor) ?? 0, currency)})`);
+        sheet.kv("charged_total_eur_minor", item.charged_total_eur_minor == null ? "—" : `${item.charged_total_eur_minor}  (${money(minorToEuros(item.charged_total_eur_minor) ?? 0, currency)})`);
+        sheet.kv("account.status", `${item.status}  (${deferredStatusLabel(item.status)})`);
+      } else if (item.source === "order_bridge_toll_items") {
         sheet.kv("toll_id", item.toll_id);
         sheet.kv("pass_count", item.pass_count);
         sheet.kv("pass_date", formatWhen(item.pass_date));
@@ -479,9 +545,9 @@ function renderTechnicalPdf(bundle: OrderBundle) {
         sheet.kv("start_date", formatWhen(item.start_date));
         sheet.kv("end_date", formatWhen(item.end_date));
       }
-      sheet.kv("price_eur_minor", `${item.price_eur_minor}  (${money(item.price_eur_minor / 100, currency)})`);
+      if (!isDeferredSource(item.source)) sheet.kv("price_eur_minor", `${item.price_eur_minor}  (${money(item.price_eur_minor / 100, currency)})`);
       sheet.kv("raw.status", item.status);
-      sheet.kv("dashboard.status", `${ui} (${statusLabels[ui] ?? ui})`);
+      sheet.kv("dashboard.status", `${ui} (${isDeferredSource(item.source) ? deferredStatusLabel(item.status) : statusLabels[ui] ?? ui})`);
       sheet.kv("plate_country_conflict", item.plate_country_conflict);
       sheet.kv("created_at", formatWhen(item.created_at));
       sheet.kv("engine_submitted_at", formatWhen(item.engine_submitted_at));
@@ -602,9 +668,10 @@ function renderCustomerPdf(bundle: OrderBundle) {
     sheet.kv("fuel_type", `${order.fuel_type ?? "—"}  (${fuelLabelEn(order.fuel_type)})`);
     sheet.kv("vehicle_vin", order.vehicle_vin);
 
-    sheet.heading(`Items (${items.length})`);
-    if (!items.length) sheet.note("No items.");
-    items.forEach((item, index) => {
+    const customerItems = items.filter(item => !isDeferredSource(item.source) || item.status === "fulfilled");
+    sheet.heading(`Items (${customerItems.length})`);
+    if (!customerItems.length) sheet.note("No items.");
+    customerItems.forEach((item, index) => {
       sheet.rule();
       sheet.kv(`#${index + 1} source`, item.source ?? "—");
       sheet.kv("item_id", item.id);
