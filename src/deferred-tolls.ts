@@ -58,7 +58,7 @@ export function minorToEuros(value?: number | null) {
   return value / 100;
 }
 
-export type CardHalf = "waiting" | "processing" | "plus" | "failed" | "fulfilled" | "deferred";
+export type CardHalf = "waiting" | "processing" | "plus" | "failed" | "fulfilled" | "later" | "deferred";
 
 export function cardHalves(items: Array<{ deferred: boolean; status: string }>): { classic: CardHalf | null; account: CardHalf | null } {
   const classic = items.filter(item => !item.deferred);
@@ -72,6 +72,7 @@ function classicHalf(items: Array<{ status: string }>): CardHalf | null {
   if (items.some(item => item.status === "processing")) return "processing";
   if (items.some(item => item.status === "plus")) return "plus";
   if (items.some(item => item.status === "waiting")) return "waiting";
+  if (items.some(item => item.status === "later")) return "later";
   if (items.every(item => item.status === "fulfilled")) return "fulfilled";
   return "waiting";
 }

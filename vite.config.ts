@@ -11,6 +11,7 @@ import { passageDisplay } from "./src/passageCatalog";
 import { loadServerConfig } from "./server-config";
 import { editorialApi } from "./editorial-api";
 import { orderExportApi } from "./order-export-api";
+import { startLaterReminders } from "./later-reminders";
 
 const execFileAsync = promisify(execFile);
 const authSessions = new Map<string, { email: string; expiresAt: number }>();
@@ -112,7 +113,7 @@ function dashboardWritePolicy() {
           return;
         }
         if (
-          (method === "POST" && (route === "/orders/fulfill-item" || route === "/orders/item-notes" || route === "/orders/ack-plate-country-conflict"))
+          (method === "POST" && (route === "/orders/fulfill-item" || route === "/orders/postpone-item" || route === "/orders/item-notes" || route === "/orders/ack-plate-country-conflict"))
           || (method === "DELETE" && route === "/orders/item-notes")
           || route.startsWith("/editorial/")
         ) {
@@ -122,7 +123,7 @@ function dashboardWritePolicy() {
         res.statusCode = 405;
         res.setHeader("Allow", "GET, HEAD, OPTIONS");
         res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.end(JSON.stringify({ error: "Dashboard je read-only; povoleno je pouze ruční označení itemu jako fulfilled, poznámky k položkám a ACK konfliktu SPZ/země." }));
+        res.end(JSON.stringify({ error: "Dashboard je read-only; povoleno je pouze ruční označení itemu jako fulfilled nebo later, poznámky k položkám a ACK konfliktu SPZ/země." }));
       });
     },
   };
@@ -292,6 +293,7 @@ function duration(start?: string, end?: string) {
 
 function itemStatus(item: RawItem, flexEnabled = false) {
   const raw = item.status.toLowerCase().replace(/[\s-]+/g, "_");
+  if (raw === "later") return "later";
   if (raw === "fulfilled") return "fulfilled";
   if (raw === "failed" || item.failed_at) return "failed";
   // Plus T−15 hold, or Plus far-future window — not released to the worker yet.
@@ -307,6 +309,7 @@ function orderStatus(rawOrderStatus: string, fulfillmentStatus: string | undefin
   if (items.some(item => item.status === "processing")) return "processing";
   if (items.some(item => item.status === "plus")) return "plus";
   if (items.length && items.every(item => item.status === "fulfilled")) return "fulfilled";
+  if (items.some(item => item.status === "later") && items.every(item => item.status === "later" || item.status === "fulfilled")) return "later";
   // Fallback when line items are still open but order-level hold is set.
   if ((fulfillmentStatus ?? "").toLowerCase() === "held") return "plus";
   return "waiting";
@@ -554,6 +557,46 @@ function manualFulfillmentApi() {
   return {
     name: "eurogopass-manual-fulfillment-api",
     configureServer(server: import("vite").ViteDevServer) {
+      startLaterReminders();
+      server.middlewares.use("/api/orders/postpone-item", async (req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ ok: false, error: "Method not allowed" }));
+          return;
+        }
+        try {
+          const sid = cookieValue(req.headers.cookie, "egp_admin_session");
+          const session = sid ? authSessions.get(sid) : undefined;
+          if (!session || session.expiresAt <= Date.now() || !isAdminEmail(session.email)) throw new Error("Přihlášení vypršelo");
+          const body = await readJsonBody<{ orderId?: string; itemId?: string; source?: string; note?: string }>(req, 16 * 1024);
+          const allowedSources = new Set(["order_items", "order_bridge_toll_items"]);
+          if (!body.orderId || !body.itemId || !body.source || !allowedSources.has(body.source)) throw new Error("Neplatná položka objednávky");
+          const note = typeof body.note === "string" ? body.note.trim() : "";
+          if (note.length > 2000) throw new Error("Poznámka je příliš dlouhá");
+          const { url, key } = loadWorkerEnv();
+          if (!url || !key) throw new Error("Supabase konfigurace nebyla nalezena");
+          const upstream = await fetch(`${url}/rest/v1/rpc/postpone_order_item`, {
+            method: "POST",
+            headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              p_order_id: body.orderId,
+              p_item_id: body.itemId,
+              p_item_source: body.source,
+              p_actor_email: session.email,
+              p_note: note || null,
+            }),
+          });
+          if (!upstream.ok) throw new Error(`Supabase postpone ${upstream.status}`);
+          const result = await upstream.json() as { remind_on?: string; valid_on?: string };
+          res.statusCode = 200;
+          res.end(JSON.stringify({ ok: true, remindOn: result.remind_on ?? null, validOn: result.valid_on ?? null }));
+        } catch (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : "Odložení selhalo" }));
+        }
+      });
       server.middlewares.use("/api/orders/fulfill-item", async (req, res) => {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Cache-Control", "no-store");

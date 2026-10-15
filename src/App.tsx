@@ -30,6 +30,7 @@ import { EditorialArticleEditor, EditorialHome, EditorialPreview, EditorialSetti
 import { isHiddenTestPlate, normalizePlateKey } from "./order-filters";
 import { passageDisplayFromProductCode } from "./passageCatalog";
 import { ACCOUNT_WAITING_LABEL, cardHalves, type CardHalf } from "./deferred-tolls";
+import { earliestRemindOn, formatCsDate } from "./later-date";
 
 type View = "dashboard" | "orders" | "order" | "logs" | "screenshots" | "documents" | "posthog" | "editorial" | "editorial-article";
 
@@ -574,6 +575,7 @@ const statusLabels: Record<OrderStatus, string> = {
   processing: "Zpracovává se",
   fulfilled: "Dokončeno",
   failed: "Neúspěšná",
+  later: "Vyřídit později",
 };
 
 function previewOrderRank(status: OrderStatus) {
@@ -597,6 +599,7 @@ const HALF_PAINT: Record<CardHalf, { fill: string; edge: string }> = {
   plus: { fill: "#eefaf9", edge: "#2aa8a4" },
   failed: { fill: "#fff1f0", edge: "#eb8581" },
   fulfilled: { fill: "#e9f9ea", edge: "#5ad162" },
+  later: { fill: "#fff8ee", edge: "#e4bd52" },
   deferred: { fill: "#f4f0fb", edge: "#7b6bb8" },
 };
 
@@ -934,11 +937,47 @@ function OrderCard({ order, onOpen }: { order: Order; onOpen: () => void }) {
   );
 }
 
-function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; openOrder: (order: Order) => void; showAll: () => void }) {
+type OrderKindFilter = "all" | "plus" | "deferred";
+let pendingOrdersFilter: OrderKindFilter = "all";
+
+function isPlusOrder(order: Order) {
+  return Boolean(order.plus) || order.status === "plus";
+}
+
+function parkedUnderDeferred(order: Order) {
+  if (!order.items.some(isDeferredItem)) return false;
+  return order.items.filter(item => !isDeferredItem(item)).every(item => item.status === "fulfilled");
+}
+
+function matchesKindFilter(order: Order, kind: OrderKindFilter) {
+  if (kind === "plus") return isPlusOrder(order);
+  if (kind === "deferred") return parkedUnderDeferred(order);
+  return true;
+}
+
+function useIsMobile() {
+  const query = "(max-width: 760px)";
+  const [mobile, setMobile] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMobile(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return mobile;
+}
+
+function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; openOrder: (order: Order) => void; showAll: (kind?: OrderKindFilter) => void }) {
   const [query, setQuery] = useState("");
+  const mobile = useIsMobile();
   const normalized = query.toUpperCase().replace(/[\s-]/g, "");
   const filtered = orderData.filter(order => !query || [order.id, order.plate.replace(/[\s-]/g, ""), order.email].some(value => value.toUpperCase().includes(normalized)));
+  // Na mobilu: Plus čekající na T−15 a Free-Flow/ePass (včetně smíšených, kde je klasická známka hotová) jsou jen pod vlastními tlačítky.
+  const plusOpenCount = orderData.filter(order => order.status === "plus").length;
+  const deferredOpenCount = orderData.filter(order => parkedUnderDeferred(order) && order.items.some(item => isDeferredItem(item) && item.status !== "fulfilled")).length;
   const previewOrders = filtered
+    .filter(order => !mobile || (order.status !== "plus" && !parkedUnderDeferred(order)))
     .filter(order => Boolean(order.paidAtIso) && order.status !== "awaiting_payment")
     .sort((a, b) => {
       const conflictRank = Number(isActionablePlateConflict(b)) - Number(isActionablePlateConflict(a));
@@ -954,7 +993,11 @@ function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; op
       <div className="order-list">
         {previewOrders.length ? previewOrders.map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />) : <div className="empty">Žádná zaplacená objednávka nenalezena</div>}
       </div>
-      <button type="button" className="all-orders" onClick={showAll}>Všechny objednávky</button>
+      <button type="button" className="all-orders" onClick={() => showAll("all")}>Všechny objednávky</button>
+      {mobile && <div className="orders-kind-buttons">
+        <button type="button" className="orders-kind-button plus" onClick={() => showAll("plus")}><Plus size={16} strokeWidth={2.75} />Plus{plusOpenCount > 0 && <em>{plusOpenCount}</em>}</button>
+        <button type="button" className="orders-kind-button deferred" onClick={() => showAll("deferred")}>Free-Flow / ePass{deferredOpenCount > 0 && <em>{deferredOpenCount}</em>}</button>
+      </div>}
     </aside>
   );
 }
@@ -1594,7 +1637,7 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
 
   return (
     <main className="dashboard-grid">
-      <OrderColumn orderData={orderData} openOrder={openOrder} showAll={() => navigate("orders")} />
+      <OrderColumn orderData={orderData} openOrder={openOrder} showAll={(kind = "all") => { pendingOrdersFilter = kind; navigate("orders"); }} />
       <div className="workspace">
         <div className="dashboard-overview">
           <DailySummaryCard overview={overview} orderData={orderData} onOpenAttention={() => setAttentionOpen(true)} />
@@ -1610,13 +1653,14 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
 
 function BackButton({ onClick }: { onClick: () => void }) { return <button className="back-button" onClick={onClick}><ArrowLeft size={18} /> Zpět</button>; }
 
-function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled, onPlateConflictAck }: {
+function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled, onItemPostponed, onPlateConflictAck }: {
   order: Order;
   orders: Order[];
   back: () => void;
   navigate: (view: View) => void;
   openOrder: (order: Order) => void;
   onItemFulfilled: (itemId: string, fulfilledAt: string) => void;
+  onItemPostponed: (itemId: string) => void;
   onPlateConflictAck: () => void;
 }) {
   const [expanded, setExpanded] = useState("");
@@ -1625,6 +1669,10 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const [fulfillOpen, setFulfillOpen] = useState(false);
   const [fulfillItemIds, setFulfillItemIds] = useState<string[]>([]);
   const [fulfillState, setFulfillState] = useState<"idle" | "saving" | "error">("idle");
+  const [laterOpen, setLaterOpen] = useState(false);
+  const [laterItemIds, setLaterItemIds] = useState<string[]>([]);
+  const [laterNote, setLaterNote] = useState("");
+  const [laterState, setLaterState] = useState<"idle" | "saving" | "error">("idle");
   const [manualAudit, setManualAudit] = useState<ManualFulfillmentAudit[]>([]);
   const [itemNotes, setItemNotes] = useState<OrderItemNote[]>([]);
   const [notesVersion, setNotesVersion] = useState(0);
@@ -1683,6 +1731,40 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
       setNotesVersion(version => version + 1);
     } catch {
       setFulfillState("error");
+    }
+  };
+
+  const toggleLaterItem = (itemId: string) => {
+    setLaterState("idle");
+    setLaterItemIds(current => current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId]);
+  };
+
+  const confirmLater = async () => {
+    const selected = order.items.filter(item => item.id && item.source && item.status !== "fulfilled" && laterItemIds.includes(item.id));
+    if (!selected.length) return;
+    setLaterState("saving");
+    try {
+      for (const item of selected) {
+        const response = await fetch("/api/orders/postpone-item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            orderId: order.id,
+            itemId: item.id,
+            source: item.source,
+            note: laterNote.trim() || undefined,
+          }),
+        });
+        const payload = await response.json() as { ok?: boolean };
+        if (!response.ok || !payload.ok) throw new Error();
+        onItemPostponed(item.id!);
+      }
+      setLaterOpen(false);
+      setLaterItemIds([]);
+      setLaterNote("");
+      setLaterState("idle");
+    } catch {
+      setLaterState("error");
     }
   };
 
@@ -1808,6 +1890,11 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const hasNote = (itemId?: string) => Boolean(itemId && (noteTextForItem(itemId) || manualAudit.some(entry => entry.item_id === itemId && entry.note?.trim())));
   const noteTargetHasStored = Boolean(noteItemId && (itemNotes.some(note => note.item_id === noteItemId) || noteDrafts[noteItemId]));
 
+  const postponableItems = order.items.filter(item => isFulfillableItem(item) && item.status !== "fulfilled");
+  const laterRemindLabel = formatCsDate(earliestRemindOn(postponableItems.filter(item => item.id && laterItemIds.includes(item.id)).map(item => {
+    const match = item.validFrom.match(/(\d{1,2})\.\s*(\d{1,2})\.\s*(\d{4})/);
+    return match ? `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}` : null;
+  })));
   const exportBusy = exportState === "bundle" || exportState === "summary" || exportState === "customer";
   const downloadExport = async (kind: "bundle" | "summary" | "customer") => {
     setExportState(kind);
@@ -1852,6 +1939,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
           <button type="button" onClick={() => navigate("screenshots")}>Screenshoty</button>
           <button type="button" onClick={() => navigate("documents")}>Doklady</button>
           <button type="button" className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button>
+          <button type="button" className="manual-later" onClick={() => { setLaterItemIds([]); setLaterNote(""); setLaterState("idle"); setLaterOpen(true); }}><Clock3 size={16} /> Vyřídit později</button>
           {exportState === "error" && <span className="hero-export-error">Soubor se nepodařilo stáhnout. Zkus to znovu.</span>}
         </div>
       </section>
@@ -1892,7 +1980,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
           const itemNote = noteTextForItem(item.id);
           const priceLabel = deferred
             ? item.chargedTotal != null ? "strženo" : item.accrued != null ? "naběhlo" : "čeká na dluh"
-            : item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.duration ?? "Čeká";
+            : item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.status === "later" ? "Později" : item.duration ?? "Čeká";
           const priceValue = deferred ? deferredHeld(item) : item.price;
           const accountOpen = deferred && item.status !== "failed" && item.status !== "fulfilled";
           return <article className={`item-card ${item.status}${deferred ? ` ${item.itemKind}` : ""}`} key={itemKey}>
@@ -1911,7 +1999,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
               <div><small>Strženo zákazníkovi</small><strong>{item.chargedTotal == null ? "—" : money(item.chargedTotal)}</strong></div>
               {item.lastError && <div className="error-summary"><strong>{item.lastError}</strong></div>}
             </div>}
-            {expanded === itemKey && !deferred && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{item.status === "failed" && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený.</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
+            {expanded === itemKey && !deferred && <div className="item-detail"><div className="timeline">{timeline.map(event => <div className={event.status} key={event.id}><i /><span><b>{event.label}</b><small>{timelineTime(event.ts)}</small></span></div>)}</div>{(item.status === "failed" || (item.status === "later" && item.lastError)) && <div className="error-summary"><strong>{item.lastError || "Worker neuložil podrobné chybové hlášení."}</strong><p>{item.status === "later" ? "Položka je odložená. Worker ji nebere, dokud ji znovu nevyřídíš." : "Stav Wise Workeru v okamžiku chyby není v dostupných datech potvrzený."}</p>{item.lastError && <details><summary>Zobrazit technický detail</summary><code>{item.lastError}</code></details>}</div>}</div>}
           </article>;
         })}
       </section>
@@ -1981,6 +2069,47 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
           </section>
         </div>
       )}
+      {laterOpen && (
+        <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => laterState !== "saving" && setLaterOpen(false)}>
+          <section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="later-title" onMouseDown={event => event.stopPropagation()}>
+            <button className="manual-fulfill-close" onClick={() => setLaterOpen(false)} aria-label="Zavřít" disabled={laterState === "saving"}><X size={18} /></button>
+            <span className="manual-fulfill-icon later"><Clock3 size={22} /></span>
+            <h2 id="later-title">Vyřídit později</h2>
+            <p>{postponableItems.length ? "Vybrané položky dostanou stav Později a worker je přestane brát. Upozornění do ntfy přijde den před nejdřívější platností." : order.items.some(isFulfillableItem) ? "Všechny klasické položky už jsou vyřízené." : "Tahle objednávka má jen Free-Flow nebo ePass. Ty se tady neodkládají."}</p>
+            <div className="manual-country-list">
+              {postponableItems.map(item => {
+                const selected = Boolean(item.id && laterItemIds.includes(item.id));
+                return (
+                  <div className="manual-country-row" key={item.id ?? `${item.source}-${item.country}-${item.product}`}>
+                    <button
+                      type="button"
+                      className={`manual-country-pick${selected ? " selected" : ""}`}
+                      disabled={!item.id || !item.source || laterState === "saving"}
+                      onClick={() => item.id && toggleLaterItem(item.id)}
+                    >
+                      <Flag code={item.country} />
+                      <span><strong>{item.product}</strong><small>{item.validFrom} · {statusLabels[item.status]}</small></span>
+                      <i />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {laterItemIds.length > 0 && <p className="later-remind">Upozornění {laterRemindLabel}.</p>}
+            <label className="manual-note-field">
+              <span>Poznámka</span>
+              <textarea value={laterNote} onChange={event => setLaterNote(event.target.value)} maxLength={2000} rows={3} placeholder="Třeba: teď to nejde, platnost začíná za deset dní." disabled={laterState === "saving"} />
+            </label>
+            {laterState === "error" && <div className="manual-fulfill-error">Odložení se nepodařilo. Zkus to prosím znovu.</div>}
+            <div className="manual-fulfill-actions">
+              <button onClick={() => setLaterOpen(false)} disabled={laterState === "saving"}>Zrušit</button>
+              <button className="confirm" onClick={() => void confirmLater()} disabled={!laterItemIds.length || laterState === "saving"}>
+                {laterState === "saving" ? "Ukládám…" : laterItemIds.length > 1 ? `Odložit (${laterItemIds.length})` : "Odložit"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {ackOpen && (
         <div className="manual-fulfill-modal" role="presentation" onMouseDown={() => ackState !== "saving" && setAckOpen(false)}>
           <section className="manual-fulfill-dialog surface" role="dialog" aria-modal="true" aria-labelledby="plate-ack-title" onMouseDown={event => event.stopPropagation()}>
@@ -2029,17 +2158,19 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
 function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: () => void; openOrder: (order: Order) => void }) {
   const [query, setQuery] = useState("");
   const [onlyConflicts, setOnlyConflicts] = useState(false);
+  const [kind, setKind] = useState<OrderKindFilter>(() => { const initial = pendingOrdersFilter; pendingOrdersFilter = "all"; return initial; });
   const [visibleCount, setVisibleCount] = useState(40);
   const normalized = query.toUpperCase().replace(/[\s-]/g, "");
   const conflictCount = useMemo(() => orderData.filter(order => order.plateCountryConflict === true).length, [orderData]);
   const filtered = useMemo(() => {
     const matched = orderData.filter(order => {
+      if (!matchesKindFilter(order, kind)) return false;
       if (onlyConflicts && order.plateCountryConflict !== true) return false;
       if (!query) return true;
       return `${order.id}${order.number}${order.plate.replace(/[\s-]/g, "")}${order.email}`.toUpperCase().includes(normalized);
     });
     return [...matched].sort((a, b) => Date.parse(b.paidAtIso ?? b.createdAtIso ?? "") - Date.parse(a.paidAtIso ?? a.createdAtIso ?? ""));
-  }, [normalized, onlyConflicts, orderData, query]);
+  }, [kind, normalized, onlyConflicts, orderData, query]);
   const visible = filtered.slice(0, visibleCount);
   const canLoadMore = visible.length < filtered.length;
   return (
@@ -2052,6 +2183,10 @@ function AllOrders({ orderData, back, openOrder }: { orderData: Order[]; back: (
           <p className="page-subtitle">{filtered.length ? `${filtered.length} objednávek` : "Žádné objednávky"}</p>
         </div>
         <div className="orders-toolbar">
+          <div className="orders-kind-tabs">
+            {([["all", "Všechny"], ["plus", "Plus"], ["deferred", "Free-Flow / ePass"]] as const).map(([value, label]) =>
+              <button key={value} type="button" className={`orders-kind-tab${kind === value ? " active" : ""}`} onClick={() => { setKind(value); setVisibleCount(40); }}>{label}</button>)}
+          </div>
           <button
             type="button"
             className={`orders-filter-chip${onlyConflicts ? " active" : ""}`}
@@ -2319,15 +2454,27 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     if (window.history.state?.egp && !window.history.state?.entry) window.history.back();
     else navigate("dashboard", true);
   };
+  const statusAfterItems = (items: OrderItem[], fallback: OrderStatus): OrderStatus => {
+    if (items.some(item => item.status === "failed")) return "failed";
+    if (items.some(item => item.status === "processing")) return "processing";
+    if (items.some(item => item.status === "plus")) return "plus";
+    if (items.some(item => item.status === "waiting")) return "waiting";
+    if (items.some(item => item.status === "later")) return "later";
+    if (items.length && items.every(item => item.status === "fulfilled")) return "fulfilled";
+    return fallback;
+  };
   const markItemFulfilled = (itemId: string, fulfilledAt: string) => {
     const update = (order: Order): Order => {
       const items = order.items.map(item => item.id === itemId ? { ...item, status: "fulfilled" as const, fulfilledAt, failedAt: undefined, lastError: undefined } : item);
-      const status: OrderStatus = items.length && items.every(item => item.status === "fulfilled") ? "fulfilled"
-        : items.some(item => item.status === "processing") ? "processing"
-        : items.some(item => item.status === "plus") ? "plus"
-        : items.some(item => item.status === "failed") ? "failed"
-        : order.status;
-      return { ...order, items, status };
+      return { ...order, items, status: statusAfterItems(items, order.status) };
+    };
+    setSelectedOrder(current => update(current));
+    setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
+  };
+  const markItemPostponed = (itemId: string) => {
+    const update = (order: Order): Order => {
+      const items = order.items.map(item => item.id === itemId ? { ...item, status: "later" as const } : item);
+      return { ...order, items, status: statusAfterItems(items, order.status) };
     };
     setSelectedOrder(current => update(current));
     setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
@@ -2337,7 +2484,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     setSelectedOrder(current => current.id === activeOrder.id ? update(current) : current);
     setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} orders={orderData} back={goBack} navigate={navigate} openOrder={openOrder} onItemFulfilled={markItemFulfilled} onPlateConflictAck={markPlateConflictAcked} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} orders={orderData} back={goBack} navigate={navigate} openOrder={openOrder} onItemFulfilled={markItemFulfilled} onItemPostponed={markItemPostponed} onPlateConflictAck={markPlateConflictAcked} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
 }
 
 export default function App() {

@@ -9,6 +9,7 @@ Povolené jsou pouze tyto výjimky:
 3. Zápisy nutné pro funkce Redakce/blogu do výhradně redakčních tabulek a úložišť.
 4. Vytvoření lokálního dashboard přihlašovacího záznamu při prvním přihlášení výhradně pro e-maily na explicitním allowlistu. Záznam smí obsahovat pouze e-mail, kryptografickou sůl, `scrypt` hash hesla a čas vytvoření v odděleném lokálním auth úložišti; nesmí vzniknout Supabase Auth účet ani zápis do obchodních nebo redakčních dat.
 5. Ruční ACK konfliktu SPZ/země registrace přes `POST /api/orders/ack-plate-country-conflict` / RPC `ack_plate_country_conflict`: smí pouze nastavit `plate_country_conflict = false` na existující objednávce a zrcadlit stejnou hodnotu do `order_items` a `order_bridge_toll_items` daného `order_id`, plus zapsat auditní řádek do `dashboard_plate_country_conflict_acks`. Nesmí měnit status, SPZ, zemi registrace, platby ani jiná obchodní pole a nesmí nastavit hodnotu zpět na `NULL`.
+6. Ruční odložení existující klasické položky přes `POST /api/orders/postpone-item` / RPC `postpone_order_item`: smí pouze nastavit `status = later` na existující `order_items` nebo `order_bridge_toll_items` a zapsat řádek do `dashboard_item_postponements`. Nesmí měnit platby, SPZ, cenu ani jiné obchodní pole a nesmí odložit položku ve stavu `fulfilled`. Otevřené připomínky smí server po odeslání ntfy označit jako `sent`.
 
 Schválené redakční operace zahrnují také ruční smazání tématu přes `DELETE /api/editorial/topics/:id`; endpoint smí mazat pouze odpovídající řádek v `blog_topic_queue` a nesmí kaskádově měnit ani mazat obchodní data.
 

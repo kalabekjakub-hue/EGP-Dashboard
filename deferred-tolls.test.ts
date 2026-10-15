@@ -43,6 +43,10 @@ test("splits a card into a vignette half and a Free-Flow half", () => {
   assert.deepEqual(cardHalves([{ deferred: true, status: "fulfilled" }]), { classic: null, account: "fulfilled" });
   assert.deepEqual(cardHalves([{ deferred: true, status: "failed" }]), { classic: null, account: "failed" });
   assert.deepEqual(cardHalves([
+    { deferred: false, status: "later" },
+    { deferred: true, status: "waiting" },
+  ]), { classic: "later", account: "deferred" });
+  assert.deepEqual(cardHalves([
     { deferred: false, status: "fulfilled" },
     { deferred: true, status: "waiting" },
   ]), { classic: "fulfilled", account: "deferred" });

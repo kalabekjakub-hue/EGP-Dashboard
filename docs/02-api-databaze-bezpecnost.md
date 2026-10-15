@@ -33,6 +33,7 @@ Ne-GET požadavky mimo allowlist → **405** (write policy).
 | `GET` | `/api/orders/summary?orderId=` | Interní technický PDF list objednávky (attachment) |
 | `GET` | `/api/orders/customer-summary?orderId=` | Anglické zákaznické PDF potvrzení splnění (vozidlo, `order_id`, položky bez selhání/retry) |
 | `POST` | `/api/orders/fulfill-item` | Ruční FULFILLED přes RPC |
+| `POST` | `/api/orders/postpone-item` | Ruční odložení na `later` přes RPC |
 | `POST` | `/api/orders/ack-plate-country-conflict` | ACK konfliktu SPZ/země přes RPC |
 | `GET` | `/api/orders/item-notes?orderId=` | Poznámky k položkám |
 | `POST` | `/api/orders/item-notes` | Nahradit poznámku (max 2000 znaků) |
@@ -42,6 +43,10 @@ Ne-GET požadavky mimo allowlist → **405** (write policy).
 ### `POST /api/orders/fulfill-item`
 
 Smí pouze nastavit `status` / `fulfilled_at` na existující `order_items` nebo `order_bridge_toll_items`, zapsat `manual_fulfillment_audit` (včetně volitelného `note`), atomicky přes RPC `manual_fulfill_order_item`. Nesmí vytvářet objednávky ani měnit jiná obchodní pole.
+
+### `POST /api/orders/postpone-item`
+
+Smí pouze nastavit `status = later` na existující klasické položce a zapsat `dashboard_item_postponements`, atomicky přes RPC `postpone_order_item`. Worker claimuje `pending`, takže `later` přestane brát. Připomínka do ntfy jde den před platností.
 
 ### `POST /api/orders/ack-plate-country-conflict`
 
@@ -162,6 +167,7 @@ Přístup: **service role pouze na serveru**. RLS na nových tabulkách bez anon
 | `202607200002_editorial_writing_style_profiles.sql` | `style_profile` |
 | `202608020001_order_item_notes.sql` | `dashboard_order_item_notes`; RPC s `p_note` |
 | `202608200001_ack_plate_country_conflict.sql` | Audit ACK + RPC `ack_plate_country_conflict` |
+| `202610150001_postpone_order_item.sql` | Stav `later`, připomínky a RPC `postpone_order_item` |
 
 ## Obchodní tabulky (čtení)
 
@@ -172,7 +178,7 @@ Přístup: **service role pouze na serveru**. RLS na nových tabulkách bez anon
 | `order_bridge_toll_items` | Mosty/tunely/mýto, mirror `plate_country_conflict` |
 | `affiliates` | Affiliate analytika |
 
-**Zápis z dashboardu (obchodní data):** status/`fulfilled_at` přes RPC `manual_fulfill_order_item`; `plate_country_conflict = false` (+ mirror) přes RPC `ack_plate_country_conflict`.
+**Zápis z dashboardu (obchodní data):** status/`fulfilled_at` přes RPC `manual_fulfill_order_item`; status `later` přes RPC `postpone_order_item`; `plate_country_conflict = false` (+ mirror) přes RPC `ack_plate_country_conflict`.
 
 ## Dashboard-owned provozní tabulky
 

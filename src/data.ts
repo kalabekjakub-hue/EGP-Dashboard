@@ -1,4 +1,4 @@
-export type OrderStatus = "awaiting_payment" | "plus" | "waiting" | "processing" | "fulfilled" | "failed";
+export type OrderStatus = "awaiting_payment" | "plus" | "waiting" | "processing" | "fulfilled" | "failed" | "later";
 
 export type OrderItem = {
   id?: string;

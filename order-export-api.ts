@@ -19,6 +19,7 @@ const statusLabels: Record<string, string> = {
   processing: "Zpracovává se",
   fulfilled: "Dokončeno",
   failed: "Neúspěšná",
+  later: "Vyřídit později",
 };
 
 type RawOrder = {
@@ -159,6 +160,7 @@ function formatWhen(value?: string) {
 
 function itemStatus(item: RawItem, flexEnabled = false) {
   const raw = item.status.toLowerCase().replace(/[\s-]+/g, "_");
+  if (raw === "later") return "later";
   if (raw === "fulfilled") return "fulfilled";
   if (raw === "failed" || item.failed_at) return "failed";
   if (raw === "held" || (raw === "waiting" && flexEnabled)) return "plus";
@@ -172,6 +174,7 @@ function orderUiStatus(rawOrderStatus: string, fulfillmentStatus: string | undef
   if (items.some(item => item.status === "processing")) return "processing";
   if (items.some(item => item.status === "plus")) return "plus";
   if (items.length && items.every(item => item.status === "fulfilled")) return "fulfilled";
+  if (items.some(item => item.status === "later") && items.every(item => item.status === "later" || item.status === "fulfilled")) return "later";
   if ((fulfillmentStatus ?? "").toLowerCase() === "held") return "plus";
   return "waiting";
 }
