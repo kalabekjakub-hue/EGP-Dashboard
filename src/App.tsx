@@ -955,29 +955,15 @@ function matchesKindFilter(order: Order, kind: OrderKindFilter) {
   return true;
 }
 
-function useIsMobile() {
-  const query = "(max-width: 760px)";
-  const [mobile, setMobile] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const media = window.matchMedia(query);
-    const update = () => setMobile(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  return mobile;
-}
-
 function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; openOrder: (order: Order) => void; showAll: (kind?: OrderKindFilter) => void }) {
   const [query, setQuery] = useState("");
-  const mobile = useIsMobile();
   const normalized = query.toUpperCase().replace(/[\s-]/g, "");
   const filtered = orderData.filter(order => !query || [order.id, order.plate.replace(/[\s-]/g, ""), order.email].some(value => value.toUpperCase().includes(normalized)));
-  // Na mobilu: Plus čekající na T−15 a Free-Flow/ePass (včetně smíšených, kde je klasická známka hotová) jsou jen pod vlastními tlačítky.
+  // Plus čekající na T−15 a Free-Flow/ePass (včetně smíšených, kde je klasická známka hotová) jsou jen pod vlastními tlačítky.
   const plusOpenCount = orderData.filter(order => order.status === "plus").length;
   const deferredOpenCount = orderData.filter(order => parkedUnderDeferred(order) && order.items.some(item => isDeferredItem(item) && item.status !== "fulfilled")).length;
   const previewOrders = filtered
-    .filter(order => !mobile || (order.status !== "plus" && !parkedUnderDeferred(order)))
+    .filter(order => order.status !== "plus" && !parkedUnderDeferred(order))
     .filter(order => Boolean(order.paidAtIso) && order.status !== "awaiting_payment")
     .sort((a, b) => {
       const conflictRank = Number(isActionablePlateConflict(b)) - Number(isActionablePlateConflict(a));
@@ -994,10 +980,10 @@ function OrderColumn({ orderData, openOrder, showAll }: { orderData: Order[]; op
         {previewOrders.length ? previewOrders.map(order => <OrderCard key={order.id} order={order} onOpen={() => openOrder(order)} />) : <div className="empty">Žádná zaplacená objednávka nenalezena</div>}
       </div>
       <button type="button" className="all-orders" onClick={() => showAll("all")}>Všechny objednávky</button>
-      {mobile && <div className="orders-kind-buttons">
+      <div className="orders-kind-buttons">
         <button type="button" className="orders-kind-button plus" onClick={() => showAll("plus")}><Plus size={16} strokeWidth={2.75} />Plus{plusOpenCount > 0 && <em>{plusOpenCount}</em>}</button>
         <button type="button" className="orders-kind-button deferred" onClick={() => showAll("deferred")}>Free-Flow / ePass{deferredOpenCount > 0 && <em>{deferredOpenCount}</em>}</button>
-      </div>}
+      </div>
     </aside>
   );
 }
