@@ -168,6 +168,7 @@ Přístup: **service role pouze na serveru**. RLS na nových tabulkách bez anon
 | `202608020001_order_item_notes.sql` | `dashboard_order_item_notes`; RPC s `p_note` |
 | `202608200001_ack_plate_country_conflict.sql` | Audit ACK + RPC `ack_plate_country_conflict` |
 | `202610150001_postpone_order_item.sql` | Stav `later`, připomínky a RPC `postpone_order_item` |
+| `202610160001_allow_later_item_status.sql` | Kontroly statusu na klasických položkách povolí `later` |
 
 ## Obchodní tabulky (čtení)
 

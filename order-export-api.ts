@@ -19,7 +19,7 @@ const statusLabels: Record<string, string> = {
   processing: "Zpracovává se",
   fulfilled: "Dokončeno",
   failed: "Neúspěšná",
-  later: "Vyřídit později",
+  later: "Odloženo",
 };
 
 type RawOrder = {

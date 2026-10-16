@@ -182,7 +182,7 @@ export const orders: Order[] = [
     locale: "cs-CZ",
     status: "waiting",
     items: [
-      { country: "AT", flag: "🇦🇹", product: "10denní známka", validFrom: "16. 10. 2026", validTo: "25. 10. 2026", price: 9.3, status: "fulfilled", duration: "41 s", reference: "AT-441902", invoice: "ready" },
+      { id: "demo-at-10d", source: "order_items", country: "AT", flag: "🇦🇹", product: "10denní známka", validFrom: "16. 10. 2026", validTo: "25. 10. 2026", price: 9.3, status: "fulfilled", duration: "41 s", reference: "AT-441902", invoice: "ready" },
       {
         id: "ff-item-mix",
         source: "order_free_flow_items",
@@ -223,8 +223,8 @@ export const orders: Order[] = [
     locale: "cs-CZ",
     status: "processing",
     items: [
-      { country: "CZ", flag: "🇨🇿", product: "Roční známka", validFrom: "12. 7. 2026", validTo: "11. 7. 2027", price: 18.5, status: "processing", currentStep: "Platba", duration: "1 min 24 s", invoice: "waiting" },
-      { country: "SK", flag: "🇸🇰", product: "10denní známka", validFrom: "12. 7. 2026", validTo: "21. 7. 2026", price: 12.5, status: "waiting", invoice: "waiting" },
+      { id: "demo-cz-365d", source: "order_items", country: "CZ", flag: "🇨🇿", product: "Roční známka", validFrom: "12. 7. 2026", validTo: "11. 7. 2027", price: 18.5, status: "processing", currentStep: "Platba", duration: "1 min 24 s", invoice: "waiting" },
+      { id: "demo-sk-10d", source: "order_items", country: "SK", flag: "🇸🇰", product: "10denní známka", validFrom: "12. 7. 2026", validTo: "21. 7. 2026", price: 12.5, status: "waiting", invoice: "waiting" },
     ],
   },
   {
@@ -243,7 +243,7 @@ export const orders: Order[] = [
     locale: "sk-SK",
     status: "fulfilled",
     items: [
-      { country: "SK", flag: "🇸🇰", product: "30denní známka", validFrom: "13. 7. 2026", validTo: "11. 8. 2026", price: 15.5, status: "fulfilled", duration: "48 s", reference: "SK-57321063", invoice: "ready" },
+      { id: "demo-sk-30d", source: "order_items", country: "SK", flag: "🇸🇰", product: "30denní známka", validFrom: "13. 7. 2026", validTo: "11. 8. 2026", price: 15.5, status: "fulfilled", duration: "48 s", reference: "SK-57321063", invoice: "ready" },
     ],
   },
   {
@@ -262,7 +262,7 @@ export const orders: Order[] = [
     locale: "de-DE",
     status: "fulfilled",
     items: [
-      { country: "AT", flag: "🇦🇹", product: "10denní známka", validFrom: "14. 7. 2026", validTo: "23. 7. 2026", price: 9.3, status: "fulfilled", duration: "1 min 06 s", reference: "AT-902184", invoice: "ready" },
+      { id: "demo-at-10d-2", source: "order_items", country: "AT", flag: "🇦🇹", product: "10denní známka", validFrom: "14. 7. 2026", validTo: "23. 7. 2026", price: 9.3, status: "fulfilled", duration: "1 min 06 s", reference: "AT-902184", invoice: "ready" },
     ],
   },
   {
@@ -281,7 +281,7 @@ export const orders: Order[] = [
     locale: "hu-HU",
     status: "plus",
     items: [
-      { country: "HU", flag: "🇭🇺", product: "Měsíční známka", validFrom: "20. 7. 2026", validTo: "19. 8. 2026", price: 18.4, status: "plus", currentStep: "Plus T−15", invoice: "waiting" },
+      { id: "demo-hu-30d", source: "order_items", country: "HU", flag: "🇭🇺", product: "Měsíční známka", validFrom: "20. 7. 2026", validTo: "19. 8. 2026", price: 18.4, status: "plus", currentStep: "Plus T−15", invoice: "waiting" },
     ],
   },
   {
@@ -300,7 +300,7 @@ export const orders: Order[] = [
     locale: "pl-PL",
     status: "failed",
     items: [
-      { country: "SI", flag: "🇸🇮", product: "7denní známka", validFrom: "13. 7. 2026", validTo: "19. 7. 2026", price: 12.4, status: "failed", duration: "2 min 17 s", currentStep: "Potvrzení platby", invoice: "waiting" },
+      { id: "demo-si-7d", source: "order_items", country: "SI", flag: "🇸🇮", product: "7denní známka", validFrom: "13. 7. 2026", validTo: "19. 7. 2026", price: 12.4, status: "failed", duration: "2 min 17 s", currentStep: "Potvrzení platby", invoice: "waiting" },
     ],
   },
 ];

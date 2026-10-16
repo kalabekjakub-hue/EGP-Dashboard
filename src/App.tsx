@@ -554,6 +554,8 @@ function buildItemTimeline(orderId: string, item: OrderItem, logs: WorkerLogEntr
     facts.push({ id: "processing", ts: item.engineSubmittedAt, label: item.engineSubmittedAt ? "Zpracování právě probíhá" : "Ve frontě workeru", status: "active" });
   } else if (item.status === "plus") {
     facts.push({ id: "plus", label: "Plus — čeká na uvolnění (T−15)", status: "waiting" });
+  } else if (item.status === "later") {
+    facts.push({ id: "later", label: "Odloženo", status: "waiting" });
   } else if (item.status === "waiting") {
     facts.push({ id: "waiting", label: "Čeká na převzetí workerem", status: "waiting" });
   }
@@ -575,7 +577,7 @@ const statusLabels: Record<OrderStatus, string> = {
   processing: "Zpracovává se",
   fulfilled: "Dokončeno",
   failed: "Neúspěšná",
-  later: "Vyřídit později",
+  later: "Odloženo",
 };
 
 function previewOrderRank(status: OrderStatus) {
@@ -1639,7 +1641,7 @@ function Dashboard({ orderData, navigate, openOrder }: { orderData: Order[]; nav
 
 function BackButton({ onClick }: { onClick: () => void }) { return <button className="back-button" onClick={onClick}><ArrowLeft size={18} /> Zpět</button>; }
 
-function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled, onItemPostponed, onPlateConflictAck }: {
+function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled, onItemPostponed, onPlateConflictAck, ordersLive }: {
   order: Order;
   orders: Order[];
   back: () => void;
@@ -1648,6 +1650,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   onItemFulfilled: (itemId: string, fulfilledAt: string) => void;
   onItemPostponed: (itemId: string) => void;
   onPlateConflictAck: () => void;
+  ordersLive: boolean;
 }) {
   const [expanded, setExpanded] = useState("");
   const [orderLogs, setOrderLogs] = useState<WorkerLogEntry[]>([]);
@@ -1659,6 +1662,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const [laterItemIds, setLaterItemIds] = useState<string[]>([]);
   const [laterNote, setLaterNote] = useState("");
   const [laterState, setLaterState] = useState<"idle" | "saving" | "error">("idle");
+  const [laterError, setLaterError] = useState("");
   const [manualAudit, setManualAudit] = useState<ManualFulfillmentAudit[]>([]);
   const [itemNotes, setItemNotes] = useState<OrderItemNote[]>([]);
   const [notesVersion, setNotesVersion] = useState(0);
@@ -1692,6 +1696,15 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
   const confirmFulfilled = async () => {
     const selected = order.items.filter(item => item.id && item.source && fulfillItemIds.includes(item.id));
     if (!selected.length) return;
+    if (!ordersLive) {
+      const fulfilledAt = new Date().toISOString();
+      for (const item of selected) onItemFulfilled(item.id!, fulfilledAt);
+      setFulfillOpen(false);
+      setFulfillItemIds([]);
+      setNoteDrafts({});
+      setFulfillState("idle");
+      return;
+    }
     setFulfillState("saving");
     try {
       for (const item of selected) {
@@ -1722,12 +1735,21 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
 
   const toggleLaterItem = (itemId: string) => {
     setLaterState("idle");
+    setLaterError("");
     setLaterItemIds(current => current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId]);
   };
 
   const confirmLater = async () => {
     const selected = order.items.filter(item => item.id && item.source && item.status !== "fulfilled" && laterItemIds.includes(item.id));
     if (!selected.length) return;
+    if (!ordersLive) {
+      for (const item of selected) onItemPostponed(item.id!);
+      setLaterOpen(false);
+      setLaterItemIds([]);
+      setLaterNote("");
+      setLaterState("idle");
+      return;
+    }
     setLaterState("saving");
     try {
       for (const item of selected) {
@@ -1741,16 +1763,18 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
             note: laterNote.trim() || undefined,
           }),
         });
-        const payload = await response.json() as { ok?: boolean };
-        if (!response.ok || !payload.ok) throw new Error();
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!response.ok || !payload.ok) throw new Error(payload.error || "");
         onItemPostponed(item.id!);
       }
       setLaterOpen(false);
       setLaterItemIds([]);
       setLaterNote("");
       setLaterState("idle");
-    } catch {
+      setLaterError("");
+    } catch (error) {
       setLaterState("error");
+      setLaterError(error instanceof Error ? error.message : "");
     }
   };
 
@@ -1925,7 +1949,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
           <button type="button" onClick={() => navigate("screenshots")}>Screenshoty</button>
           <button type="button" onClick={() => navigate("documents")}>Doklady</button>
           <button type="button" className="manual-fulfilled" onClick={() => { setFulfillItemIds([]); setNoteDrafts({}); setFulfillState("idle"); setFulfillOpen(true); }}><CheckCircle2 size={16} /> FULFILLED</button>
-          <button type="button" className="manual-later" onClick={() => { setLaterItemIds([]); setLaterNote(""); setLaterState("idle"); setLaterOpen(true); }}><Clock3 size={16} /> Vyřídit později</button>
+          <button type="button" className="manual-later" onClick={() => { setLaterItemIds([]); setLaterNote(""); setLaterState("idle"); setLaterError(""); setLaterOpen(true); }}><Clock3 size={16} /> Vyřídit později</button>
           {exportState === "error" && <span className="hero-export-error">Soubor se nepodařilo stáhnout. Zkus to znovu.</span>}
         </div>
       </section>
@@ -1966,7 +1990,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
           const itemNote = noteTextForItem(item.id);
           const priceLabel = deferred
             ? item.chargedTotal != null ? "strženo" : item.accrued != null ? "naběhlo" : "čeká na dluh"
-            : item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.status === "later" ? "Později" : item.duration ?? "Čeká";
+            : item.status === "processing" && item.engineSubmittedAt ? compactDuration(item.engineSubmittedAt, new Date(now).toISOString()) : item.status === "plus" ? "Plus" : item.status === "later" ? "Odloženo" : item.duration ?? "Čeká";
           const priceValue = deferred ? deferredHeld(item) : item.price;
           const accountOpen = deferred && item.status !== "failed" && item.status !== "fulfilled";
           return <article className={`item-card ${item.status}${deferred ? ` ${item.itemKind}` : ""}`} key={itemKey}>
@@ -2061,7 +2085,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
             <button className="manual-fulfill-close" onClick={() => setLaterOpen(false)} aria-label="Zavřít" disabled={laterState === "saving"}><X size={18} /></button>
             <span className="manual-fulfill-icon later"><Clock3 size={22} /></span>
             <h2 id="later-title">Vyřídit později</h2>
-            <p>{postponableItems.length ? "Vybrané položky dostanou stav Později a worker je přestane brát. Upozornění do ntfy přijde den před nejdřívější platností." : order.items.some(isFulfillableItem) ? "Všechny klasické položky už jsou vyřízené." : "Tahle objednávka má jen Free-Flow nebo ePass. Ty se tady neodkládají."}</p>
+            <p>{postponableItems.length ? "Vybrané položky dostanou stav Odloženo a worker je přestane brát. Upozornění do ntfy přijde den před nejdřívější platností." : order.items.some(isFulfillableItem) ? "Všechny klasické položky už jsou vyřízené." : "Tahle objednávka má jen Free-Flow nebo ePass. Ty se tady neodkládají."}</p>
             <div className="manual-country-list">
               {postponableItems.map(item => {
                 const selected = Boolean(item.id && laterItemIds.includes(item.id));
@@ -2086,7 +2110,7 @@ function OrderDetail({ order, orders, back, navigate, openOrder, onItemFulfilled
               <span>Poznámka</span>
               <textarea value={laterNote} onChange={event => setLaterNote(event.target.value)} maxLength={2000} rows={3} placeholder="Třeba: teď to nejde, platnost začíná za deset dní." disabled={laterState === "saving"} />
             </label>
-            {laterState === "error" && <div className="manual-fulfill-error">Odložení se nepodařilo. Zkus to prosím znovu.</div>}
+            {laterState === "error" && <div className="manual-fulfill-error">{laterError || "Odložení se nepodařilo. Zkus to prosím znovu."}</div>}
             <div className="manual-fulfill-actions">
               <button onClick={() => setLaterOpen(false)} disabled={laterState === "saving"}>Zrušit</button>
               <button className="confirm" onClick={() => void confirmLater()} disabled={!laterItemIds.length || laterState === "saving"}>
@@ -2380,6 +2404,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
   const [routeArticleId, setRouteArticleId] = useState(initialRoute.articleId ?? "");
   const [routeArticleLocale, setRouteArticleLocale] = useState(initialRoute.articleLocale ?? "cs");
   const [orderData, setOrderData] = useState<Order[]>(demoOrders);
+  const [ordersLive, setOrdersLive] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order>(demoOrders[0]);
   useEffect(() => {
     window.history.replaceState({ egp: true, entry: true }, "", window.location.href);
@@ -2400,6 +2425,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
       .then((payload: { mode: string; data?: Order[] }) => {
         if (payload.mode === "live" && payload.data?.length) {
           const data = payload.data.filter(order => !isHiddenTestPlate(order.plate));
+          setOrdersLive(true);
           setOrderData(data);
           setSelectedOrder(current => data.find(order => order.id === current.id) ?? data[0]);
         }
@@ -2470,7 +2496,7 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
     setSelectedOrder(current => current.id === activeOrder.id ? update(current) : current);
     setOrderData(current => current.map(order => order.id === activeOrder.id ? update(order) : order));
   };
-  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} orders={orderData} back={goBack} navigate={navigate} openOrder={openOrder} onItemFulfilled={markItemFulfilled} onItemPostponed={markItemPostponed} onPlateConflictAck={markPlateConflictAcked} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
+  return <><Header goHome={() => navigate("dashboard")} navigate={navigate} onClearAttention={() => { if (view !== "dashboard") navigate("dashboard"); window.setTimeout(() => window.dispatchEvent(new Event("egp-clear-attention")), 0); }} onLogout={onLogout} />{view === "dashboard" && <Dashboard orderData={orderData} navigate={navigate} openOrder={openOrder} />}{view === "orders" && <AllOrders orderData={orderData} back={goBack} openOrder={openOrder} />}{view === "order" && <OrderDetail order={activeOrder} orders={orderData} back={goBack} navigate={navigate} openOrder={openOrder} onItemFulfilled={markItemFulfilled} onItemPostponed={markItemPostponed} onPlateConflictAck={markPlateConflictAcked} ordersLive={ordersLive} />}{view === "logs" && <FullLogs back={goBack} />}{view === "screenshots" && <FileTree kind="screenshots" baseOrder={activeOrder} back={goBack} />}{view === "documents" && <FileTree kind="documents" baseOrder={activeOrder} back={goBack} />}{view === "posthog" && <PostHogDetail back={goBack} />}{view === "editorial" && <EditorialHome back={goBack} openArticle={openArticle} />}{view === "editorial-article" && <EditorialArticleEditor key={`${routeArticleId}:${routeArticleLocale}`} articleId={routeArticleId} initialLocale={routeArticleLocale} onLocaleChange={locale => openArticleLocale(routeArticleId, locale)} back={goBack} />}</>;
 }
 
 export default function App() {

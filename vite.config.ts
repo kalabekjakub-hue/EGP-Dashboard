@@ -588,7 +588,15 @@ function manualFulfillmentApi() {
               p_note: note || null,
             }),
           });
-          if (!upstream.ok) throw new Error(`Supabase postpone ${upstream.status}`);
+          if (!upstream.ok) {
+            const detail = await upstream.text();
+            let message = `Supabase postpone ${upstream.status}`;
+            try {
+              const parsed = JSON.parse(detail) as { message?: string };
+              if (parsed.message?.includes("_status_check")) message = "Databáze ještě nepovoluje stav later.";
+            } catch { /* keep the status code */ }
+            throw new Error(message);
+          }
           const result = await upstream.json() as { remind_on?: string; valid_on?: string };
           res.statusCode = 200;
           res.end(JSON.stringify({ ok: true, remindOn: result.remind_on ?? null, validOn: result.valid_on ?? null }));
